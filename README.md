@@ -57,6 +57,8 @@ go build -o simrelay ./cmd/simrelay
 | `SIMRELAY_BAUD` | `115200` | 串口波特率 |
 | `SIMRELAY_LISTEN` | `:7575` | HTTP 监听地址 |
 | `SIMRELAY_TIMEOUT` | `5s` | AT 命令超时时间 |
+| `SIMRELAY_ADMIN_USERNAME` | `admin` | Web 控制台账号 |
+| `SIMRELAY_ADMIN_PASSWORD` | `admin` | Web 控制台密码，部署时建议通过环境变量覆盖 |
 
 ## Web 控制台
 

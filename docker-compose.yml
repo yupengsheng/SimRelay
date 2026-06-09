@@ -6,12 +6,14 @@ services:
     restart: unless-stopped
     environment:
       TZ: Asia/Shanghai
-      SIMRELAY_DEVICE: /dev/ttyUSB3
+      SIMRELAY_DEVICE: /dev/ttyUSB2
       SIMRELAY_BAUD: "115200"
       SIMRELAY_LISTEN: ":7575"
       SIMRELAY_TIMEOUT: 5s
+      SIMRELAY_ADMIN_USERNAME: admin
+      SIMRELAY_ADMIN_PASSWORD: ${SIMRELAY_ADMIN_PASSWORD:-admin}
     devices:
-      - /dev/ttyUSB3:/dev/ttyUSB3
+      - /dev/ttyUSB2:/dev/ttyUSB2
     ports:
       - "7576:7575"
     healthcheck:

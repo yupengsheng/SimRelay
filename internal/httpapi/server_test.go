@@ -37,6 +37,24 @@ func (f *fakeModem) SendMessage(to string, text string) (modem.SendResult, error
 	return f.sent, f.err
 }
 
+func (f *fakeModem) DeleteMessage(index int) error {
+	return f.err
+}
+
+func (f *fakeModem) RawCommand(command string) ([]string, error) {
+	if f.err != nil {
+		return nil, f.err
+	}
+	return []string{"OK"}, nil
+}
+
+func (f *fakeModem) SendUSSD(code string) (modem.USSDResult, error) {
+	if f.err != nil {
+		return modem.USSDResult{}, f.err
+	}
+	return modem.USSDResult{Status: "0", Text: "余额 10 元"}, nil
+}
+
 func TestHealthz(t *testing.T) {
 	server := New(&fakeModem{})
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
@@ -98,6 +116,38 @@ func TestDeviceStatus(t *testing.T) {
 	}
 }
 
+func TestVoHiveLogin(t *testing.T) {
+	t.Setenv("SIMRELAY_ADMIN_USERNAME", "admin")
+	t.Setenv("SIMRELAY_ADMIN_PASSWORD", "secret")
+	server := New(&fakeModem{})
+	req := httptest.NewRequest(http.MethodPost, "/api/auth/login", bytes.NewBufferString(`{"username":"admin","password":"secret"}`))
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"token"`)) {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+}
+
+func TestVoHiveDevices(t *testing.T) {
+	server := New(&fakeModem{status: modem.DeviceStatus{Manufacturer: "Quectel", Model: "EC20F", IMEI: "865860049674642", SIM: "READY", SignalRSSI: 30, Registered: true}})
+	req := httptest.NewRequest(http.MethodGet, "/api/devices", nil)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d", rec.Code)
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"devices"`)) || !bytes.Contains(rec.Body.Bytes(), []byte(`EC20F`)) {
+		t.Fatalf("body = %s", rec.Body.String())
+	}
+}
+
 func TestListMessages(t *testing.T) {
 	server := New(&fakeModem{messages: []modem.Message{{Index: 1, From: "+8613800000000", Text: "中文测试"}}})
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/messages?box=all", nil)
@@ -114,6 +164,28 @@ func TestListMessages(t *testing.T) {
 	}
 	if len(body) != 1 || body[0].Text != "中文测试" {
 		t.Fatalf("body = %#v", body)
+	}
+}
+
+func TestVoHiveSMSContactsAndThread(t *testing.T) {
+	fake := &fakeModem{
+		status: modem.DeviceStatus{Model: "EC20F", IMEI: "865860049674642"},
+		messages: []modem.Message{
+			{Index: 1, Status: "REC READ", From: "+8613800000000", Text: "中文测试", Timestamp: "26/06/09,15:30:01+32"},
+		},
+	}
+	server := New(fake)
+
+	for _, path := range []string{"/api/sms/contacts?limit=20", "/api/sms/thread?peer=%2B8613800000000&limit=20"} {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d", path, rec.Code)
+		}
+		if !bytes.Contains(rec.Body.Bytes(), []byte("中文测试")) {
+			t.Fatalf("%s body = %s", path, rec.Body.String())
+		}
 	}
 }
 
@@ -167,6 +239,29 @@ func TestSendMessage(t *testing.T) {
 	}
 	if body.Reference != 42 {
 		t.Fatalf("body = %#v", body)
+	}
+}
+
+func TestVoHiveSendATAndUSSD(t *testing.T) {
+	server := New(&fakeModem{})
+	tests := []struct {
+		path string
+		body string
+		want string
+	}{
+		{"/api/devices/ec20/actions/at", `{"command":"AT"}`, `"response"`},
+		{"/api/devices/ec20/actions/ussd", `{"code":"*100#"}`, "余额"},
+	}
+	for _, tt := range tests {
+		req := httptest.NewRequest(http.MethodPost, tt.path, bytes.NewBufferString(tt.body))
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d", tt.path, rec.Code)
+		}
+		if !bytes.Contains(rec.Body.Bytes(), []byte(tt.want)) {
+			t.Fatalf("%s body = %s", tt.path, rec.Body.String())
+		}
 	}
 }
 

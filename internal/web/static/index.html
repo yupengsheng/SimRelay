@@ -4,140 +4,218 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SimRelay</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/assets/app.css" />
     <script>
       try {
-        if (localStorage.getItem('simrelay-theme') === 'dark') {
-          document.documentElement.classList.add('dark')
-        }
+        if (localStorage.getItem('theme') === 'dark') document.documentElement.classList.add('dark')
       } catch {}
     </script>
   </head>
   <body>
-    <div id="app">
+    <div id="toast" class="toast hidden" role="status"></div>
+
+    <section id="loginView" class="login-view hidden">
+      <form id="loginForm" class="login-card">
+        <div class="login-mark">S</div>
+        <h1>SimRelay</h1>
+        <p>登录短信与设备控制台</p>
+        <label>
+          <span>账号</span>
+          <input id="loginUsername" autocomplete="username" value="admin" />
+        </label>
+        <label>
+          <span>密码</span>
+          <input id="loginPassword" type="password" autocomplete="current-password" />
+        </label>
+        <button id="loginBtn" class="primary-btn" type="submit">登录</button>
+      </form>
+    </section>
+
+    <div id="app" class="app-shell hidden">
       <aside class="sidebar">
         <div class="brand">
-          <div class="brand-mark">SR</div>
+          <div class="brand-mark">S</div>
           <div>
             <div class="brand-title">SimRelay</div>
-            <div class="brand-subtitle">EC20 SMS Console</div>
+            <div class="brand-subtitle">EC20 Control Plane</div>
           </div>
         </div>
+
         <nav class="nav" aria-label="主导航">
-          <button class="nav-item active" type="button" data-panel="messages" aria-label="短信">
-            <span class="icon">M</span><span>短信</span>
+          <button class="nav-item active" type="button" data-route="sms">
+            <span class="nav-icon">✉</span><span>短信</span>
           </button>
-          <button class="nav-item" type="button" data-panel="device" aria-label="设备">
-            <span class="icon">D</span><span>设备</span>
+          <button class="nav-item" type="button" data-route="devices">
+            <span class="nav-icon">▣</span><span>设备管理</span>
+          </button>
+          <button class="nav-item disabled" type="button" data-route="proxy">
+            <span class="nav-icon">⇄</span><span>代理</span>
+          </button>
+          <button class="nav-item disabled" type="button" data-route="logs">
+            <span class="nav-icon">⌘</span><span>日志</span>
           </button>
         </nav>
-        <div class="side-status">
-          <span class="status-dot" id="sideDot"></span>
-          <span id="sideStatus">等待刷新</span>
+
+        <div class="sidebar-footer">
+          <div class="side-status"><span id="sideDot" class="status-dot"></span><span id="sideStatus">等待刷新</span></div>
+          <button id="logoutBtn" class="ghost-btn" type="button">退出登录</button>
         </div>
       </aside>
 
-      <main class="shell">
-        <header class="topbar">
+      <main class="main">
+        <header class="page-header">
           <div>
-            <h1>短信中继</h1>
-            <p>读取 SIM 卡短信，发送中文短信，检查 EC20 在线状态。</p>
+            <h1 id="pageTitle">短信</h1>
+            <p id="pageSubtitle">按联系人查看短信会话，发送中文短信。</p>
           </div>
-          <div class="top-actions">
-            <button id="themeBtn" class="icon-btn" type="button" aria-label="切换深浅色">◐</button>
-            <button id="refreshBtn" class="primary-btn" type="button">刷新</button>
+          <div class="header-actions">
+            <button id="themeBtn" class="icon-btn" type="button" aria-label="切换主题">◐</button>
+            <button id="refreshBtn" class="glass-btn" type="button">刷新</button>
           </div>
         </header>
 
-        <section class="alert hidden" id="alert" role="status"></section>
+        <section id="smsView" class="view sms-page">
+          <div class="sms-card">
+            <aside class="device-column">
+              <div class="column-head">
+                <h2>设备</h2>
+                <select id="smsDeviceSelect" aria-label="短信设备"></select>
+              </div>
+              <div id="smsDeviceList" class="device-mini-list"></div>
+            </aside>
 
-        <section class="metrics" aria-label="设备摘要">
-          <article class="metric-card">
-            <span class="metric-label">SIM</span>
-            <strong id="simValue">--</strong>
-          </article>
-          <article class="metric-card">
-            <span class="metric-label">网络</span>
-            <strong id="networkValue">--</strong>
-          </article>
-          <article class="metric-card">
-            <span class="metric-label">信号 RSSI</span>
-            <strong id="signalValue">--</strong>
-          </article>
-          <article class="metric-card">
-            <span class="metric-label">短信</span>
-            <strong id="messageCount">--</strong>
-          </article>
+            <aside class="thread-column">
+              <div class="column-head">
+                <div>
+                  <h2>联系人</h2>
+                  <p id="contactCount">0 个会话</p>
+                </div>
+                <input id="contactSearch" class="search-input" placeholder="搜索号码 / 内容" />
+              </div>
+              <div id="contactList" class="contact-list"></div>
+            </aside>
+
+            <section class="chat-column">
+              <div class="chat-head">
+                <div>
+                  <h2 id="chatTitle">请选择会话</h2>
+                  <p id="chatMeta">短信内容会显示在这里</p>
+                </div>
+                <button id="deleteThreadBtn" class="danger-ghost-btn hidden" type="button">删除会话</button>
+              </div>
+              <div id="messagePane" class="message-pane empty">暂无会话</div>
+              <form id="sendForm" class="composer">
+                <div class="composer-meta">
+                  <span id="encodingInfo">UCS2 · 0 字符 · 0 段</span>
+                </div>
+                <div class="composer-row">
+                  <input id="recipientInput" placeholder="收件号码" autocomplete="tel" />
+                  <textarea id="messageInput" rows="2" maxlength="500" placeholder="输入短信内容"></textarea>
+                  <button id="sendBtn" class="primary-btn" type="submit">发送</button>
+                </div>
+              </form>
+            </section>
+          </div>
         </section>
 
-        <section class="workspace panel-visible" id="messagesPanel">
-          <section class="panel list-panel">
-            <div class="panel-head">
-              <div>
-                <h2>短信列表</h2>
-                <p id="listHint">全部短信</p>
+        <section id="devicesView" class="view devices-page hidden">
+          <div class="devices-layout">
+            <aside class="panel device-list-panel">
+              <div class="column-head">
+                <h2>设备列表</h2>
+                <input id="deviceSearch" class="search-input" placeholder="搜索设备 / IMEI / 串口" />
               </div>
-              <select id="boxSelect" aria-label="短信箱">
-                <option value="all">全部</option>
-                <option value="unread">未读</option>
-                <option value="inbox">收件箱</option>
-                <option value="sent">已发送</option>
-              </select>
-            </div>
-            <div id="messageList" class="message-list"></div>
-          </section>
+              <div id="deviceList" class="managed-device-list"></div>
+            </aside>
 
-          <section class="panel detail-panel">
-            <div class="panel-head">
-              <div>
-                <h2>短信详情</h2>
-                <p id="detailMeta">选择一条短信查看内容</p>
+            <section class="device-detail">
+              <div class="panel device-hero">
+                <div>
+                  <div class="device-brand-icon">S</div>
+                </div>
+                <div class="device-hero-main">
+                  <h2 id="deviceName">--</h2>
+                  <p><span id="deviceId">--</span> · 公网 IP: <span id="publicIP">---</span></p>
+                </div>
+                <div class="device-actions">
+                  <button id="openSmsBtn" class="glass-btn" type="button">短信</button>
+                  <button id="rotateIpBtn" class="glass-btn" type="button">切换 IP</button>
+                  <button id="rebootBtn" class="danger-ghost-btn" type="button">重启模组</button>
+                </div>
               </div>
-            </div>
-            <div id="messageDetail" class="message-detail empty">暂无选中短信</div>
-          </section>
 
-          <section class="panel send-panel">
-            <div class="panel-head">
-              <div>
-                <h2>发送短信</h2>
-                <p>默认使用 UCS2，支持中文内容。</p>
+              <div class="tabs">
+                <button class="tab active" type="button" data-tab="overview">概览</button>
+                <button class="tab" type="button" data-tab="at">AT 终端</button>
+                <button class="tab" type="button" data-tab="ussd">USSD 终端</button>
+                <button class="tab" type="button" data-tab="config">配置</button>
               </div>
-            </div>
-            <form id="sendForm" class="send-form">
-              <label>
-                <span>收件号码</span>
-                <input id="toInput" name="to" autocomplete="tel" placeholder="+8613800000000" />
-              </label>
-              <label>
-                <span>短信内容</span>
-                <textarea id="textInput" name="text" rows="8" maxlength="500" placeholder="输入短信内容"></textarea>
-              </label>
-              <div class="form-footer">
-                <span id="textCounter">0 / 500</span>
-                <button id="sendBtn" class="primary-btn" type="submit">发送</button>
-              </div>
-            </form>
-          </section>
-        </section>
 
-        <section class="device-grid hidden" id="devicePanel">
-          <article class="panel device-card">
-            <h2>设备信息</h2>
-            <dl>
-              <div><dt>厂商</dt><dd id="manufacturerValue">--</dd></div>
-              <div><dt>型号</dt><dd id="modelValue">--</dd></div>
-              <div><dt>IMEI</dt><dd id="imeiValue">--</dd></div>
-              <div><dt>BER</dt><dd id="berValue">--</dd></div>
-            </dl>
-          </article>
-          <article class="panel device-card">
-            <h2>部署提示</h2>
-            <p class="muted">Docker 运行时需要把 EC20 AT 串口映射进容器，例如 `/dev/ttyUSB2:/dev/ttyUSB2`，并设置 `SIMRELAY_DEVICE=/dev/ttyUSB2`。</p>
-          </article>
+              <div id="overviewTab" class="tab-panel">
+                <div class="overview-grid">
+                  <article class="metric-card"><span>SIM</span><strong id="simValue">--</strong></article>
+                  <article class="metric-card"><span>驻网</span><strong id="regValue">--</strong></article>
+                  <article class="metric-card"><span>信号</span><strong id="signalValue">--</strong></article>
+                  <article class="metric-card"><span>短信</span><strong id="smsCountValue">--</strong></article>
+                </div>
+                <div class="panel info-grid">
+                  <dl>
+                    <div><dt>厂商</dt><dd id="manufacturerValue">--</dd></div>
+                    <div><dt>型号</dt><dd id="modelValue">--</dd></div>
+                    <div><dt>IMEI</dt><dd id="imeiValue">--</dd></div>
+                    <div><dt>串口</dt><dd id="portValue">--</dd></div>
+                    <div><dt>网络模式</dt><dd id="networkModeValue">LTE</dd></div>
+                    <div><dt>BER</dt><dd id="berValue">--</dd></div>
+                  </dl>
+                </div>
+              </div>
+
+              <div id="atTab" class="tab-panel hidden">
+                <div class="panel terminal-panel">
+                  <div class="terminal-toolbar">
+                    <select id="quickAT">
+                      <option value="AT">AT</option>
+                      <option value="AT+CSQ">AT+CSQ</option>
+                      <option value="AT+CREG?">AT+CREG?</option>
+                      <option value="AT+CPIN?">AT+CPIN?</option>
+                      <option value="AT+CGSN">AT+CGSN</option>
+                    </select>
+                    <input id="atCommand" value="AT" />
+                    <button id="sendATBtn" class="primary-btn" type="button">执行</button>
+                  </div>
+                  <pre id="atOutput" class="terminal-output">等待执行 AT 命令</pre>
+                </div>
+              </div>
+
+              <div id="ussdTab" class="tab-panel hidden">
+                <div class="panel terminal-panel">
+                  <div class="terminal-toolbar">
+                    <input id="ussdCode" placeholder="*100#" />
+                    <button id="sendUSSDBtn" class="primary-btn" type="button">发送 USSD</button>
+                  </div>
+                  <pre id="ussdOutput" class="terminal-output">等待发送 USSD</pre>
+                </div>
+              </div>
+
+              <div id="configTab" class="tab-panel hidden">
+                <div class="panel config-panel">
+                  <dl>
+                    <div><dt>设备后端</dt><dd>AT</dd></div>
+                    <div><dt>短信能力</dt><dd>已启用</dd></div>
+                    <div><dt>数据网络</dt><dd>SimRelay 暂不接管</dd></div>
+                    <div><dt>VoWiFi / eSIM</dt><dd>SimRelay 暂不支持</dd></div>
+                  </dl>
+                </div>
+              </div>
+            </section>
+          </div>
         </section>
       </main>
     </div>
+
     <script src="/assets/app.js"></script>
   </body>
 </html>

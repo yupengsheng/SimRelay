@@ -55,6 +55,12 @@ type SendResult struct {
 	Reference int `json:"reference"`
 }
 
+type USSDResult struct {
+	Status string `json:"status"`
+	Text   string `json:"text"`
+	Raw    string `json:"raw_text,omitempty"`
+}
+
 func (m *EC20) Init() error {
 	commands := []string{
 		"AT",
@@ -148,6 +154,53 @@ func (m *EC20) SendMessage(to string, text string) (SendResult, error) {
 		}
 	}
 	return SendResult{}, ErrParse
+}
+
+func (m *EC20) DeleteMessage(index int) error {
+	_, err := m.at.Command("AT+CMGD=" + strconv.Itoa(index))
+	return err
+}
+
+func (m *EC20) RawCommand(command string) ([]string, error) {
+	command = strings.TrimSpace(command)
+	if command == "" {
+		return nil, ErrParse
+	}
+	return m.at.Command(command)
+}
+
+func (m *EC20) SendUSSD(code string) (USSDResult, error) {
+	code = strings.TrimSpace(code)
+	if code == "" {
+		return USSDResult{}, ErrParse
+	}
+	lines, err := m.at.Command(fmt.Sprintf(`AT+CUSD=1,"%s",15`, code))
+	if err != nil {
+		return USSDResult{}, err
+	}
+	result := USSDResult{Status: "ok"}
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if !strings.HasPrefix(line, "+CUSD:") {
+			continue
+		}
+		result.Raw = line
+		parts := splitCSV(strings.TrimSpace(strings.TrimPrefix(line, "+CUSD:")))
+		if len(parts) > 0 {
+			result.Status = strings.TrimSpace(parts[0])
+		}
+		if len(parts) > 1 {
+			value := unquote(parts[1])
+			if decoded, decodeErr := DecodeUCS2(value); decodeErr == nil {
+				result.Text = decoded
+			} else {
+				result.Text = value
+			}
+		}
+		return result, nil
+	}
+	result.Raw = strings.Join(lines, "\n")
+	return result, nil
 }
 
 func EncodeUCS2(value string) string {
