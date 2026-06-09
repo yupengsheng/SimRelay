@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -23,6 +24,7 @@ type Port interface {
 type Client struct {
 	port    Port
 	timeout time.Duration
+	mu      sync.Mutex
 }
 
 func NewClient(port Port, timeout time.Duration) *Client {
@@ -30,13 +32,17 @@ func NewClient(port Port, timeout time.Duration) *Client {
 }
 
 func (c *Client) Command(command string) ([]string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if err := c.write(command + "\r"); err != nil {
 		return nil, err
 	}
-	return c.readFinalResponse(false)
+	return c.readFinalResponse(command, false)
 }
 
 func (c *Client) CommandSMS(command string, payload string) ([]string, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	if err := c.write(command + "\r"); err != nil {
 		return nil, err
 	}
@@ -46,7 +52,7 @@ func (c *Client) CommandSMS(command string, payload string) ([]string, error) {
 	if err := c.write(payload + "\x1a"); err != nil {
 		return nil, err
 	}
-	return c.readFinalResponse(false)
+	return c.readFinalResponse(command, false)
 }
 
 func (c *Client) write(value string) error {
@@ -82,14 +88,14 @@ func (c *Client) waitForPrompt() error {
 	}
 }
 
-func (c *Client) readFinalResponse(includePrompt bool) ([]string, error) {
+func (c *Client) readFinalResponse(command string, includePrompt bool) ([]string, error) {
 	var buf bytes.Buffer
 	tmp := make([]byte, 512)
 	for {
 		n, err := c.port.Read(tmp)
 		if n > 0 {
 			buf.Write(tmp[:n])
-			lines, final, commandErr := parseLines(buf.String(), includePrompt)
+			lines, final, commandErr := parseLines(buf.String(), command, includePrompt)
 			if commandErr {
 				return nil, ErrCommand
 			}
@@ -106,7 +112,7 @@ func (c *Client) readFinalResponse(includePrompt bool) ([]string, error) {
 	}
 }
 
-func parseLines(raw string, includePrompt bool) ([]string, bool, bool) {
+func parseLines(raw string, command string, includePrompt bool) ([]string, bool, bool) {
 	raw = strings.ReplaceAll(raw, "\r\n", "\n")
 	raw = strings.ReplaceAll(raw, "\r", "\n")
 	parts := strings.Split(raw, "\n")
@@ -117,6 +123,9 @@ func parseLines(raw string, includePrompt bool) ([]string, bool, bool) {
 			continue
 		}
 		if !includePrompt && line == ">" {
+			continue
+		}
+		if command != "" && line == command {
 			continue
 		}
 		switch line {

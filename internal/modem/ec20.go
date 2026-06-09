@@ -224,13 +224,13 @@ func parseCREG(line string, status *DeviceStatus) error {
 func boxCode(box MessageBox) string {
 	switch box {
 	case BoxInbox:
-		return "1"
+		return `"REC READ"`
 	case BoxSent:
-		return "3"
+		return `"STO SENT"`
 	case BoxUnread:
-		return "0"
+		return `"REC UNREAD"`
 	default:
-		return "4"
+		return `"ALL"`
 	}
 }
 

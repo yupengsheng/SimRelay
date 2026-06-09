@@ -49,6 +49,36 @@ func TestHealthz(t *testing.T) {
 	}
 }
 
+func TestServesWebUI(t *testing.T) {
+	server := New(&fakeModem{})
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if contentType := rec.Header().Get("Content-Type"); !bytes.Contains([]byte(contentType), []byte("text/html")) {
+		t.Fatalf("content type = %q", contentType)
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte("SimRelay")) {
+		t.Fatalf("body does not contain app title: %s", rec.Body.String())
+	}
+}
+
+func TestUnknownAPIRouteIsNotWebFallback(t *testing.T) {
+	server := New(&fakeModem{})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/missing", nil)
+	rec := httptest.NewRecorder()
+
+	server.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusNotFound)
+	}
+}
+
 func TestDeviceStatus(t *testing.T) {
 	server := New(&fakeModem{status: modem.DeviceStatus{Manufacturer: "Quectel", Model: "EC20", SIM: "READY"}})
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/device", nil)

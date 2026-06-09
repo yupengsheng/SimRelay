@@ -34,7 +34,7 @@ func (p *scriptedPort) SetReadTimeout(time.Duration) error {
 
 func TestCommandReturnsResponseLinesBeforeOK(t *testing.T) {
 	port := &scriptedPort{
-		reads: []string{"\r\nQuectel\r\nEC20\r\nOK\r\n"},
+		reads: []string{"\r\nAT+CGMI\r\r\nQuectel\r\nEC20\r\nOK\r\n"},
 	}
 	client := NewClient(port, time.Second)
 

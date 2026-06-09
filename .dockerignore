@@ -1,0 +1,6 @@
+.git
+.gitignore
+docs/superpowers
+tmp
+dist
+*.log

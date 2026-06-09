@@ -94,7 +94,7 @@ func TestDeviceStatusParsesEC20Responses(t *testing.T) {
 
 func TestListMessagesParsesUCS2Messages(t *testing.T) {
 	client := &fakeAT{replies: map[string][]string{
-		"AT+CMGL=4": {
+		`AT+CMGL="ALL"`: {
 			`+CMGL: 1,"REC READ","002B0038003600310033003800300030003000300030003000300030",,"26/06/09,15:30:01+32"`,
 			"4E2D65876D4B8BD5",
 		},

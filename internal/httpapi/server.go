@@ -3,12 +3,14 @@ package httpapi
 import (
 	"encoding/json"
 	"errors"
+	"io/fs"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/yupengsheng/SimRelay/internal/at"
 	"github.com/yupengsheng/SimRelay/internal/modem"
+	"github.com/yupengsheng/SimRelay/internal/web"
 )
 
 type Modem interface {
@@ -42,6 +44,8 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/messages", s.listMessages)
 	s.mux.HandleFunc("GET /api/v1/messages/", s.readMessage)
 	s.mux.HandleFunc("POST /api/v1/messages", s.sendMessage)
+	s.mux.Handle("GET /assets/", http.FileServerFS(staticFS()))
+	s.mux.HandleFunc("GET /", s.index)
 }
 
 func (s *Server) healthz(w http.ResponseWriter, _ *http.Request) {
@@ -105,6 +109,22 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, result)
+}
+
+func (s *Server) index(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/api/") {
+		http.NotFound(w, r)
+		return
+	}
+	http.ServeFileFS(w, r, web.Static, "static/index.html")
+}
+
+func staticFS() fs.FS {
+	static, err := fs.Sub(web.Static, "static")
+	if err != nil {
+		panic(err)
+	}
+	return static
 }
 
 func statusForError(err error) int {

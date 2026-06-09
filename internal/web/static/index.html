@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SimRelay</title>
+    <link rel="stylesheet" href="/assets/app.css" />
+    <script>
+      try {
+        if (localStorage.getItem('simrelay-theme') === 'dark') {
+          document.documentElement.classList.add('dark')
+        }
+      } catch {}
+    </script>
+  </head>
+  <body>
+    <div id="app">
+      <aside class="sidebar">
+        <div class="brand">
+          <div class="brand-mark">SR</div>
+          <div>
+            <div class="brand-title">SimRelay</div>
+            <div class="brand-subtitle">EC20 SMS Console</div>
+          </div>
+        </div>
+        <nav class="nav" aria-label="主导航">
+          <button class="nav-item active" type="button" data-panel="messages" aria-label="短信">
+            <span class="icon">M</span><span>短信</span>
+          </button>
+          <button class="nav-item" type="button" data-panel="device" aria-label="设备">
+            <span class="icon">D</span><span>设备</span>
+          </button>
+        </nav>
+        <div class="side-status">
+          <span class="status-dot" id="sideDot"></span>
+          <span id="sideStatus">等待刷新</span>
+        </div>
+      </aside>
+
+      <main class="shell">
+        <header class="topbar">
+          <div>
+            <h1>短信中继</h1>
+            <p>读取 SIM 卡短信，发送中文短信，检查 EC20 在线状态。</p>
+          </div>
+          <div class="top-actions">
+            <button id="themeBtn" class="icon-btn" type="button" aria-label="切换深浅色">◐</button>
+            <button id="refreshBtn" class="primary-btn" type="button">刷新</button>
+          </div>
+        </header>
+
+        <section class="alert hidden" id="alert" role="status"></section>
+
+        <section class="metrics" aria-label="设备摘要">
+          <article class="metric-card">
+            <span class="metric-label">SIM</span>
+            <strong id="simValue">--</strong>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label">网络</span>
+            <strong id="networkValue">--</strong>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label">信号 RSSI</span>
+            <strong id="signalValue">--</strong>
+          </article>
+          <article class="metric-card">
+            <span class="metric-label">短信</span>
+            <strong id="messageCount">--</strong>
+          </article>
+        </section>
+
+        <section class="workspace panel-visible" id="messagesPanel">
+          <section class="panel list-panel">
+            <div class="panel-head">
+              <div>
+                <h2>短信列表</h2>
+                <p id="listHint">全部短信</p>
+              </div>
+              <select id="boxSelect" aria-label="短信箱">
+                <option value="all">全部</option>
+                <option value="unread">未读</option>
+                <option value="inbox">收件箱</option>
+                <option value="sent">已发送</option>
+              </select>
+            </div>
+            <div id="messageList" class="message-list"></div>
+          </section>
+
+          <section class="panel detail-panel">
+            <div class="panel-head">
+              <div>
+                <h2>短信详情</h2>
+                <p id="detailMeta">选择一条短信查看内容</p>
+              </div>
+            </div>
+            <div id="messageDetail" class="message-detail empty">暂无选中短信</div>
+          </section>
+
+          <section class="panel send-panel">
+            <div class="panel-head">
+              <div>
+                <h2>发送短信</h2>
+                <p>默认使用 UCS2，支持中文内容。</p>
+              </div>
+            </div>
+            <form id="sendForm" class="send-form">
+              <label>
+                <span>收件号码</span>
+                <input id="toInput" name="to" autocomplete="tel" placeholder="+8613800000000" />
+              </label>
+              <label>
+                <span>短信内容</span>
+                <textarea id="textInput" name="text" rows="8" maxlength="500" placeholder="输入短信内容"></textarea>
+              </label>
+              <div class="form-footer">
+                <span id="textCounter">0 / 500</span>
+                <button id="sendBtn" class="primary-btn" type="submit">发送</button>
+              </div>
+            </form>
+          </section>
+        </section>
+
+        <section class="device-grid hidden" id="devicePanel">
+          <article class="panel device-card">
+            <h2>设备信息</h2>
+            <dl>
+              <div><dt>厂商</dt><dd id="manufacturerValue">--</dd></div>
+              <div><dt>型号</dt><dd id="modelValue">--</dd></div>
+              <div><dt>IMEI</dt><dd id="imeiValue">--</dd></div>
+              <div><dt>BER</dt><dd id="berValue">--</dd></div>
+            </dl>
+          </article>
+          <article class="panel device-card">
+            <h2>部署提示</h2>
+            <p class="muted">Docker 运行时需要把 EC20 AT 串口映射进容器，例如 `/dev/ttyUSB2:/dev/ttyUSB2`，并设置 `SIMRELAY_DEVICE=/dev/ttyUSB2`。</p>
+          </article>
+        </section>
+      </main>
+    </div>
+    <script src="/assets/app.js"></script>
+  </body>
+</html>
