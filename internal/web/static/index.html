@@ -126,32 +126,48 @@
         </section>
 
         <section id="smsView" class="view sms-page hidden">
-          <div class="sms-card">
+          <div id="smsCard" class="sms-card">
+            <aside id="smsDeviceColumn" class="sms-device-column">
+              <div class="column-head">
+                <h2>设备</h2>
+                <select id="smsDeviceSelect" class="sr-only" aria-label="短信设备"></select>
+              </div>
+              <div id="smsDeviceList" class="sms-device-list"></div>
+            </aside>
+
             <aside id="smsThreadListView" class="thread-list-mode">
               <div class="column-head">
-                <select id="smsDeviceSelect" aria-label="短信设备"></select>
                 <input id="contactSearch" class="search-input" placeholder="搜索联系人/内容" />
               </div>
               <div id="contactList" class="contact-list"></div>
             </aside>
 
-            <section id="smsChatView" class="chat-column hidden">
+            <section id="smsChatView" class="chat-column">
               <div class="chat-head">
                 <div>
                   <button id="backToThreadsBtn" class="text-btn" type="button">返回</button>
                   <h2 id="chatTitle">请选择会话</h2>
                   <p id="chatMeta">短信内容会显示在这里</p>
                 </div>
-                <button id="deleteThreadBtn" class="danger-ghost-btn hidden" type="button">删除会话</button>
+                <div class="chat-actions">
+                  <button id="chatLatestBtn" class="glass-btn" type="button">最新</button>
+                  <button id="deleteThreadBtn" class="danger-ghost-btn hidden" type="button">删除会话</button>
+                </div>
               </div>
-              <div id="messagePane" class="message-pane empty">暂无会话</div>
+              <div id="messagePane" class="message-pane empty">
+                <div>
+                  <h2>选择会话</h2>
+                  <p>点击联系人查看短信明细，或新建短信。</p>
+                  <button id="emptyNewSmsBtn" class="primary-btn" type="button" data-empty-new-sms>新建短信</button>
+                </div>
+              </div>
               <form id="sendForm" class="composer">
                 <div class="composer-meta">
                   <span id="encodingInfo">UCS2 · 0 字符 · 0 段</span>
                 </div>
                 <div class="composer-row">
-                  <input id="recipientInput" placeholder="收件号码" autocomplete="tel" />
-                  <textarea id="messageInput" rows="2" maxlength="500" placeholder="输入短信内容"></textarea>
+                  <input id="recipientInput" class="recipient-field" placeholder="收件号码" autocomplete="tel" />
+                  <textarea id="messageInput" rows="2" maxlength="500" placeholder="回复（Enter 发送）"></textarea>
                   <button id="sendBtn" class="primary-btn" type="submit">发送</button>
                 </div>
               </form>
@@ -314,20 +330,20 @@
 
         <section id="proxyView" class="view proxy-page hidden">
           <div class="tabs standalone-tabs">
-            <button class="tab active" type="button">漫游前置代理</button>
-            <button class="tab" type="button">本地出站代理</button>
+            <button class="tab active" type="button" data-proxy-tab="roaming">漫游前置代理</button>
+            <button class="tab" type="button" data-proxy-tab="local">本地出站代理</button>
           </div>
           <div class="panel empty-module">
             <div class="section-head">
               <div>
-                <h2>VoWiFi 漫游前置代理</h2>
-                <p>VoWiFi 通过 Socks5 代理穿透连接海外运营商。注意 Socks5 端必须支持 UDP Associate</p>
+                <h2 id="proxyTitle">VoWiFi 漫游前置代理</h2>
+                <p id="proxyDescription">VoWiFi 通过 Socks5 代理穿透连接海外运营商。注意 Socks5 端必须支持 UDP Associate</p>
               </div>
               <button class="primary-btn" type="button" id="addProxyBtn">新增代理</button>
             </div>
             <div class="empty-icon">∅</div>
-            <h2>暂无前置代理</h2>
-            <p>点击「新增代理」创建 Socks5 前置代理，绑定设备后 VoWiFi 将通过代理连接运营商</p>
+            <h2 id="proxyEmptyTitle">暂无前置代理</h2>
+            <p id="proxyEmptyText">点击「新增代理」创建 Socks5 前置代理，绑定设备后 VoWiFi 将通过代理连接运营商</p>
           </div>
         </section>
 
@@ -353,14 +369,14 @@
 
         <section id="settingsView" class="view settings-page hidden">
           <div class="settings-grid">
-            <section class="panel settings-card">
+            <form id="credentialForm" class="panel settings-card">
               <h2>安全</h2>
               <p>更新访问凭证</p>
-              <label for="currentPassword"><span>当前密码</span><input id="currentPassword" name="current_password" type="password" placeholder="••••••••" /></label>
-              <label for="newPassword"><span>新密码</span><input id="newPassword" name="new_password" type="password" placeholder="••••••••" /></label>
-              <label for="confirmPassword"><span>确认新密码</span><input id="confirmPassword" name="confirm_password" type="password" placeholder="••••••••" /></label>
-              <button class="primary-btn" type="button" id="updateCredentialBtn">更新凭证</button>
-            </section>
+              <label for="currentPassword"><span>当前密码</span><input id="currentPassword" name="current_password" type="password" autocomplete="current-password" placeholder="••••••••" /></label>
+              <label for="newPassword"><span>新密码</span><input id="newPassword" name="new_password" type="password" autocomplete="new-password" placeholder="••••••••" /></label>
+              <label for="confirmPassword"><span>确认新密码</span><input id="confirmPassword" name="confirm_password" type="password" autocomplete="new-password" placeholder="••••••••" /></label>
+              <button class="primary-btn" type="submit" id="updateCredentialBtn">更新凭证</button>
+            </form>
             <section class="panel settings-card">
               <h2>系统信息</h2>
               <p>运行环境</p>
@@ -369,7 +385,7 @@
                 <div><dt>构建时间</dt><dd id="settingsBuildTime">--</dd></div>
                 <div><dt>配置路径</dt><dd id="settingsConfigPath">environment</dd></div>
                 <div><dt>交流群</dt><dd>https://t.me/vohive</dd></div>
-                <div><dt>API 文档</dt><dd><button class="glass-btn" type="button">打开 API 文档</button></dd></div>
+                <div><dt>API 文档</dt><dd><button id="openApiDocsBtn" class="glass-btn" type="button">打开 API 文档</button></dd></div>
               </dl>
             </section>
             <section class="panel settings-card settings-wide">
@@ -381,24 +397,38 @@
                 <button class="primary-btn" type="button" id="saveNotifyBtn">保存通知配置</button>
               </div>
               <div class="tabs standalone-tabs">
-                <button class="tab active" type="button">Telegram Bot</button>
-                <button class="tab" type="button">飞书 Bot</button>
-                <button class="tab" type="button">QQ Bot</button>
-                <button class="tab" type="button">Bark</button>
-                <button class="tab" type="button">Email</button>
-                <button class="tab" type="button">Pushplus</button>
-                <button class="tab" type="button">Webhook</button>
+                <button class="tab active" type="button" data-notify-tab="Telegram Bot">Telegram Bot</button>
+                <button class="tab" type="button" data-notify-tab="飞书 Bot">飞书 Bot</button>
+                <button class="tab" type="button" data-notify-tab="QQ Bot">QQ Bot</button>
+                <button class="tab" type="button" data-notify-tab="Bark">Bark</button>
+                <button class="tab" type="button" data-notify-tab="Email">Email</button>
+                <button class="tab" type="button" data-notify-tab="Pushplus">Pushplus</button>
+                <button class="tab" type="button" data-notify-tab="Webhook">Webhook</button>
               </div>
               <div class="notify-grid">
-                <label class="switch-row" for="telegramEnabled"><span>启用 Telegram 机器人</span><input id="telegramEnabled" name="telegram_enabled" type="checkbox" /></label>
-                <label for="telegramToken"><span>BOT TOKEN</span><input id="telegramToken" name="telegram_token" disabled placeholder="xxxx:yyyy" /></label>
-                <label for="telegramChatId"><span>CHAT ID</span><input id="telegramChatId" name="telegram_chat_id" disabled placeholder="例如 123456" /></label>
-                <label for="telegramProxy"><span>HTTP 代理（可选）</span><input id="telegramProxy" name="telegram_proxy" disabled placeholder="例如 http://127.0.0.1:7890" /></label>
+                <label class="switch-row" for="telegramEnabled"><span id="notifyEnableLabel">启用 Telegram 机器人</span><input id="telegramEnabled" name="telegram_enabled" type="checkbox" /></label>
+                <label for="telegramToken"><span id="notifyTokenLabel">BOT TOKEN</span><input id="telegramToken" name="telegram_token" disabled placeholder="xxxx:yyyy" /></label>
+                <label for="telegramChatId"><span id="notifyTargetLabel">CHAT ID</span><input id="telegramChatId" name="telegram_chat_id" disabled placeholder="例如 123456" /></label>
+                <label for="telegramProxy"><span id="notifyExtraLabel">HTTP 代理（可选）</span><input id="telegramProxy" name="telegram_proxy" disabled placeholder="例如 http://127.0.0.1:7890" /></label>
               </div>
             </section>
           </div>
         </section>
       </main>
+    </div>
+
+    <div id="modalBackdrop" class="modal-backdrop hidden" role="presentation">
+      <section class="modal" role="dialog" aria-modal="true" aria-labelledby="modalTitle">
+        <div class="modal-head">
+          <div>
+            <h2 id="modalTitle">操作</h2>
+            <p id="modalSubtitle"></p>
+          </div>
+          <button id="modalCloseBtn" class="icon-btn" type="button" aria-label="关闭">×</button>
+        </div>
+        <div id="modalBody" class="modal-body"></div>
+        <div id="modalActions" class="modal-actions"></div>
+      </section>
     </div>
 
     <script src="/assets/app.js"></script>

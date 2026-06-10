@@ -62,15 +62,20 @@ const els = {
   trafficRxLabel: $('#trafficRxLabel'),
   trafficTxLabel: $('#trafficTxLabel'),
   trafficTotalLabel: $('#trafficTotalLabel'),
+  smsCard: $('#smsCard'),
+  smsDeviceColumn: $('#smsDeviceColumn'),
   smsThreadListView: $('#smsThreadListView'),
   smsChatView: $('#smsChatView'),
   smsDeviceSelect: $('#smsDeviceSelect'),
+  smsDeviceList: $('#smsDeviceList'),
   contactSearch: $('#contactSearch'),
   contactList: $('#contactList'),
   chatTitle: $('#chatTitle'),
   chatMeta: $('#chatMeta'),
   backToThreadsBtn: $('#backToThreadsBtn'),
+  chatLatestBtn: $('#chatLatestBtn'),
   deleteThreadBtn: $('#deleteThreadBtn'),
+  emptyNewSmsBtn: $('#emptyNewSmsBtn'),
   messagePane: $('#messagePane'),
   sendForm: $('#sendForm'),
   recipientInput: $('#recipientInput'),
@@ -107,11 +112,31 @@ const els = {
   settingsVersion: $('#settingsVersion'),
   settingsBuildTime: $('#settingsBuildTime'),
   settingsConfigPath: $('#settingsConfigPath'),
+  credentialForm: $('#credentialForm'),
+  notifyEnableLabel: $('#notifyEnableLabel'),
+  notifyTokenLabel: $('#notifyTokenLabel'),
+  notifyTargetLabel: $('#notifyTargetLabel'),
+  notifyExtraLabel: $('#notifyExtraLabel'),
+  telegramEnabled: $('#telegramEnabled'),
+  telegramToken: $('#telegramToken'),
+  telegramChatId: $('#telegramChatId'),
+  telegramProxy: $('#telegramProxy'),
   updateCredentialBtn: $('#updateCredentialBtn'),
   saveNotifyBtn: $('#saveNotifyBtn'),
   addProxyBtn: $('#addProxyBtn'),
+  proxyTitle: $('#proxyTitle'),
+  proxyDescription: $('#proxyDescription'),
+  proxyEmptyTitle: $('#proxyEmptyTitle'),
+  proxyEmptyText: $('#proxyEmptyText'),
   networkSelectBtn: $('#networkSelectBtn'),
   flightModeBtn: $('#flightModeBtn'),
+  openApiDocsBtn: $('#openApiDocsBtn'),
+  modalBackdrop: $('#modalBackdrop'),
+  modalTitle: $('#modalTitle'),
+  modalSubtitle: $('#modalSubtitle'),
+  modalBody: $('#modalBody'),
+  modalActions: $('#modalActions'),
+  modalCloseBtn: $('#modalCloseBtn'),
 }
 
 function normalizeRoute(route) {
@@ -123,6 +148,36 @@ function showToast(message, kind = 'error') {
   els.toast.className = `toast ${kind}`
   window.clearTimeout(showToast.timer)
   showToast.timer = window.setTimeout(() => els.toast.classList.add('hidden'), 3600)
+}
+
+function openModal({ title, subtitle = '', body = '', actions = [] }) {
+  els.modalTitle.textContent = title
+  els.modalSubtitle.textContent = subtitle
+  els.modalSubtitle.classList.toggle('hidden', !subtitle)
+  els.modalBody.innerHTML = body
+  els.modalActions.innerHTML = ''
+  for (const action of actions) {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = action.className || 'glass-btn'
+    button.textContent = action.label
+    button.addEventListener('click', action.onClick || closeModal)
+    els.modalActions.append(button)
+  }
+  if (!actions.length) {
+    const button = document.createElement('button')
+    button.type = 'button'
+    button.className = 'primary-btn'
+    button.textContent = '知道了'
+    button.addEventListener('click', closeModal)
+    els.modalActions.append(button)
+  }
+  els.modalBackdrop.classList.remove('hidden')
+  setTimeout(() => els.modalCloseBtn.focus(), 0)
+}
+
+function closeModal() {
+  els.modalBackdrop.classList.add('hidden')
 }
 
 async function api(path, options = {}) {
@@ -189,6 +244,7 @@ function logout() {
 }
 
 function navigate(route, options = { refresh: true }) {
+  closeModal()
   state.route = normalizeRoute(route)
   if (location.hash !== `#/${state.route}`) location.hash = `#/${state.route}`
 
@@ -226,6 +282,7 @@ async function refreshAll() {
       await loadDevices()
       await loadContacts({ keepSelection: true })
       if (state.selectedContact || state.composingNewSMS) await loadThread()
+      else renderMessages()
       renderSMSMode()
     } else if (state.route === 'logs') {
       await loadLogs()
@@ -333,6 +390,9 @@ async function loadContacts(options = {}) {
   if (state.selectedContact && !state.contacts.some((contact) => contactKey(contact) === state.selectedContact)) {
     state.selectedContact = ''
   }
+  if (!state.selectedContact && !state.composingNewSMS && state.contacts[0] && !isNarrowScreen()) {
+    state.selectedContact = contactKey(state.contacts[0])
+  }
   renderContacts()
 }
 
@@ -374,6 +434,21 @@ function renderSMSDevices() {
     option.selected = option.value === state.selectedDevice
     els.smsDeviceSelect.append(option)
   }
+  els.smsDeviceList.innerHTML = choices
+    .map((device) => {
+      const selected = device.id === state.selectedDevice
+      const subtitle = device.id === 'all' ? '汇总所有设备短信' : device.interface || device.at_port || device.id
+      return `
+        <button class="sms-device-item ${selected ? 'active' : ''}" type="button" data-sms-device="${escapeHTML(device.id)}">
+          <span class="status-dot ${device.healthy === false ? 'bad' : 'ok'}"></span>
+          <span>
+            <strong>${escapeHTML(device.name || device.id)}</strong>
+            <small>${escapeHTML(subtitle)}</small>
+          </span>
+        </button>
+      `
+    })
+    .join('')
 }
 
 function renderContacts() {
@@ -383,7 +458,13 @@ function renderContacts() {
     : state.contacts
 
   if (!contacts.length) {
-    els.contactList.innerHTML = '<div class="empty-state">暂无短信会话</div>'
+    els.contactList.innerHTML = `
+      <div class="empty-state empty-contact-state">
+        <strong>暂无短信会话</strong>
+        <span>收到短信后会按联系人聚合显示。</span>
+        <button class="primary-btn" type="button" data-empty-new-sms>新建短信</button>
+      </div>
+    `
     return
   }
   els.contactList.innerHTML = contacts
@@ -410,10 +491,14 @@ function renderContacts() {
 }
 
 function renderSMSMode() {
+  const narrow = isNarrowScreen()
   const showChat = Boolean(state.selectedContact || state.composingNewSMS)
-  els.smsThreadListView.classList.toggle('hidden', showChat)
-  els.smsChatView.classList.toggle('hidden', !showChat)
-  if (!showChat) {
+  els.smsCard.classList.toggle('chat-open', showChat)
+  els.smsDeviceColumn.classList.toggle('hidden', narrow && showChat)
+  els.smsThreadListView.classList.toggle('hidden', narrow && showChat)
+  els.smsChatView.classList.toggle('hidden', narrow && !showChat)
+  els.backToThreadsBtn.classList.toggle('hidden', !narrow)
+  if (!showChat && narrow) {
     state.messages = []
     renderContacts()
   } else {
@@ -425,6 +510,7 @@ function renderMessages() {
   const contact = selectedContact()
   const inComposeMode = state.composingNewSMS && !contact
   els.deleteThreadBtn.classList.toggle('hidden', !contact)
+  els.chatLatestBtn.classList.toggle('hidden', !contact)
   if (contact) els.recipientInput.value = contact.peer
   if (inComposeMode && !els.recipientInput.value) els.recipientInput.value = ''
 
@@ -436,22 +522,36 @@ function renderMessages() {
       : '短信内容会显示在这里'
 
   if (inComposeMode) {
-    els.messagePane.className = 'message-pane empty'
-    els.messagePane.textContent = '新短信'
+    els.messagePane.className = 'message-pane empty compose-empty'
+    els.messagePane.innerHTML = '<div><h2>新短信</h2><p>填写收件号码和内容后发送。支持中文短信。</p></div>'
+    els.recipientInput.readOnly = false
+    els.recipientInput.classList.remove('hidden')
     return
   }
   if (!contact) {
     els.messagePane.className = 'message-pane empty'
-    els.messagePane.textContent = '暂无会话'
+    els.messagePane.innerHTML = `
+      <div>
+        <h2>选择会话</h2>
+        <p>点击联系人查看短信明细，或新建短信。</p>
+        <button class="primary-btn" type="button" data-empty-new-sms>新建短信</button>
+      </div>
+    `
+    els.recipientInput.readOnly = false
+    els.recipientInput.classList.remove('hidden')
     return
   }
   if (!state.messages.length) {
     els.messagePane.className = 'message-pane empty'
-    els.messagePane.textContent = '没有短信'
+    els.messagePane.innerHTML = '<div><h2>没有短信</h2><p>这个会话暂无短信明细。</p></div>'
+    els.recipientInput.readOnly = true
+    els.recipientInput.classList.add('hidden')
     return
   }
 
   els.messagePane.className = 'message-pane'
+  els.recipientInput.readOnly = true
+  els.recipientInput.classList.add('hidden')
   let lastDate = ''
   els.messagePane.innerHTML = state.messages
     .map((message) => {
@@ -459,15 +559,19 @@ function renderMessages() {
       const dateHTML = date !== lastDate ? `<div class="date-chip">${escapeHTML(date)}</div>` : ''
       lastDate = date
       const outgoing = Number(message.type) === 2 || String(message.status || '').includes('STO')
+      const contactName = escapeHTML(message.peer || contact.peer || '未知号码')
+      const localPhone = escapeHTML(message.local_phone || contact.local_phone || contact.device_name || contact.device_id || 'EC20')
       return `
         ${dateHTML}
         <div class="message-row ${outgoing ? 'outgoing' : 'incoming'}">
           <div class="message-bubble">
-            <div class="message-content">${escapeHTML(message.content || '')}</div>
-            <div class="message-foot">
-              <span>${formatTime(message.timestamp)}</span>
+            <div class="message-sender">
+              <strong>${contactName}</strong>
+              <span>${localPhone}</span>
+              <span>${formatFullTime(message.timestamp)}</span>
               <button class="delete-message" data-message-id="${message.id}" title="删除短信">删除</button>
             </div>
+            <div class="message-content">${escapeHTML(message.content || '')}</div>
           </div>
         </div>
       `
@@ -478,9 +582,26 @@ function renderMessages() {
 
 function renderManagedDevices() {
   const query = els.deviceSearch.value.trim().toLowerCase()
-  const devices = query
+  const statusFilter = $('#deviceStatusFilter')?.value || '全部状态'
+  const sortField = $('#deviceSortField')?.value || '排序：名称'
+  const sortDirection = $('#deviceSortDirection')?.value || '升序'
+  let devices = query
     ? state.devices.filter((device) => `${device.id} ${device.name} ${device.interface} ${device.modem?.imei || ''} ${device.modem?.iccid || ''}`.toLowerCase().includes(query))
     : state.devices
+  devices = devices.filter((device) => {
+    if (statusFilter === '在线') return isDeviceOnline(device)
+    if (statusFilter === '离线') return !isDeviceOnline(device)
+    return true
+  })
+  devices = [...devices].sort((a, b) => {
+    let result
+    if (sortField === '排序：信号') {
+      result = Number(b.modem?.signal_dbm || -999) - Number(a.modem?.signal_dbm || -999)
+    } else {
+      result = String(a.name || a.id).localeCompare(String(b.name || b.id), 'zh-Hans-CN')
+    }
+    return sortDirection === '降序' ? -result : result
+  })
   if (!devices.length) {
     els.deviceList.innerHTML = '<div class="empty-state">暂无设备</div>'
     return
@@ -593,6 +714,43 @@ async function loadSettings() {
 
 async function loadProxy() {
   await api('/proxies')
+}
+
+function showUnsupportedModal(title, detail) {
+  openModal({
+    title,
+    subtitle: '当前 SimRelay 已保留 VoHive 同款入口',
+    body: `<p>${escapeHTML(detail)}</p><p>真实 EC20 短信、AT、USSD 控制已可用；数据网络、eSIM、VoWiFi 代理等能力会按后续硬件接管情况继续补齐。</p>`,
+  })
+}
+
+function setProxyTab(tab) {
+  const roaming = tab !== 'local'
+  $$('[data-proxy-tab]').forEach((button) => button.classList.toggle('active', button.dataset.proxyTab === (roaming ? 'roaming' : 'local')))
+  els.proxyTitle.textContent = roaming ? 'VoWiFi 漫游前置代理' : '本地出站代理'
+  els.proxyDescription.textContent = roaming
+    ? 'VoWiFi 通过 Socks5 代理穿透连接海外运营商。注意 Socks5 端必须支持 UDP Associate'
+    : '配置设备访问外部网络时使用的本地出站代理'
+  els.proxyEmptyTitle.textContent = roaming ? '暂无前置代理' : '暂无本地出站代理'
+  els.proxyEmptyText.textContent = roaming
+    ? '点击「新增代理」创建 Socks5 前置代理，绑定设备后 VoWiFi 将通过代理连接运营商'
+    : '点击「新增代理」创建本地代理配置，后续网络接管后可绑定设备使用'
+}
+
+function setNotifyTab(label) {
+  $$('[data-notify-tab]').forEach((button) => button.classList.toggle('active', button.dataset.notifyTab === label))
+  const normalized = label || 'Telegram Bot'
+  els.notifyEnableLabel.textContent = `启用 ${normalized}`
+  els.notifyTokenLabel.textContent = normalized.includes('Email') ? 'SMTP 服务器' : normalized.includes('Webhook') ? 'Webhook URL' : `${normalized.toUpperCase()} TOKEN`
+  els.notifyTargetLabel.textContent = normalized.includes('Email') ? '收件人' : normalized.includes('Bark') ? 'Device Key' : '目标 ID'
+  els.notifyExtraLabel.textContent = normalized.includes('Webhook') ? '签名密钥（可选）' : 'HTTP 代理（可选）'
+}
+
+function toggleNotifyInputs() {
+  const enabled = els.telegramEnabled.checked
+  for (const input of [els.telegramToken, els.telegramChatId, els.telegramProxy]) {
+    input.disabled = !enabled
+  }
 }
 
 async function sendMessage(event) {
@@ -737,6 +895,10 @@ function newSMS() {
   setTimeout(() => els.recipientInput.focus(), 0)
 }
 
+function scrollMessagesToBottom() {
+  els.messagePane.scrollTop = els.messagePane.scrollHeight
+}
+
 function exportLogs() {
   const content = state.logs.map((item) => `${item.ts || ''}\t${item.level || ''}\t${item.source || ''}\t${item.message || ''}`).join('\n')
   const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
@@ -755,6 +917,15 @@ function isDeviceOnline(device) {
 function formatTime(value) {
   const date = parseDate(value)
   return date ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) : ''
+}
+
+function formatFullTime(value) {
+  const date = parseDate(value)
+  return date ? date.toLocaleString() : ''
+}
+
+function isNarrowScreen() {
+  return window.matchMedia('(max-width: 860px)').matches
 }
 
 function formatDate(value) {
@@ -793,7 +964,20 @@ els.loginForm.addEventListener('submit', login)
 els.logoutBtn.addEventListener('click', logout)
 els.refreshBtn.addEventListener('click', refreshAll)
 els.rescanBtn.addEventListener('click', rescanDevices)
-els.addDeviceBtn.addEventListener('click', () => showToast('SimRelay 当前通过环境变量绑定单个 EC20 设备'))
+els.addDeviceBtn.addEventListener('click', () =>
+  openModal({
+    title: '添加设备',
+    subtitle: '当前部署为单 EC20 直通模式',
+    body: `
+      <p>SimRelay 当前通过 Docker 环境变量绑定真实 EC20 AT 口。</p>
+      <dl class="modal-dl">
+        <div><dt>设备变量</dt><dd>SIMRELAY_DEVICE</dd></div>
+        <div><dt>当前端口</dt><dd>${escapeHTML(selectedDeviceDetail()?.at_port || selectedDeviceDetail()?.interface || '/dev/ttyUSB2')}</dd></div>
+      </dl>
+      <p>如果需要添加更多设备，后续需要先扩展多设备配置存储和串口映射。</p>
+    `,
+  }),
+)
 els.newSmsBtn.addEventListener('click', newSMS)
 els.themeBtn.addEventListener('click', () => {
   document.documentElement.classList.toggle('dark')
@@ -818,8 +1002,24 @@ els.smsDeviceSelect.addEventListener('change', async () => {
   if (state.selectedContact) await loadThread()
   renderSMSMode()
 })
+els.smsDeviceList.addEventListener('click', async (event) => {
+  const button = event.target.closest('[data-sms-device]')
+  if (!button) return
+  state.selectedDevice = button.dataset.smsDevice || 'all'
+  els.smsDeviceSelect.value = state.selectedDevice
+  state.selectedContact = ''
+  state.composingNewSMS = false
+  await loadContacts({ keepSelection: false })
+  if (state.selectedContact) await loadThread()
+  renderSMSDevices()
+  renderSMSMode()
+})
 els.contactSearch.addEventListener('input', renderContacts)
 els.contactList.addEventListener('click', async (event) => {
+  if (event.target.closest('[data-empty-new-sms]')) {
+    newSMS()
+    return
+  }
   const button = event.target.closest('[data-contact]')
   if (!button) return
   state.selectedContact = button.dataset.contact
@@ -829,7 +1029,13 @@ els.contactList.addEventListener('click', async (event) => {
   renderSMSMode()
 })
 els.backToThreadsBtn.addEventListener('click', backToThreads)
+els.chatLatestBtn.addEventListener('click', scrollMessagesToBottom)
+els.emptyNewSmsBtn.addEventListener('click', newSMS)
 els.messagePane.addEventListener('click', async (event) => {
+  if (event.target.closest('[data-empty-new-sms]')) {
+    newSMS()
+    return
+  }
   const button = event.target.closest('[data-message-id]')
   if (button) await deleteMessage(button.dataset.messageId)
 })
@@ -843,6 +1049,9 @@ els.messageInput.addEventListener('keydown', (event) => {
   }
 })
 els.deviceSearch.addEventListener('input', renderManagedDevices)
+$('#deviceStatusFilter')?.addEventListener('change', renderManagedDevices)
+$('#deviceSortField')?.addEventListener('change', renderManagedDevices)
+$('#deviceSortDirection')?.addEventListener('change', renderManagedDevices)
 els.deviceList.addEventListener('click', (event) => {
   const button = event.target.closest('[data-managed-device]')
   if (!button) return
@@ -851,10 +1060,10 @@ els.deviceList.addEventListener('click', (event) => {
   renderDeviceDetail()
 })
 els.openSmsBtn.addEventListener('click', () => navigate('sms'))
-els.rotateIpBtn.addEventListener('click', () => showToast('SimRelay 当前未接管数据网络，无法切换 IP'))
+els.rotateIpBtn.addEventListener('click', () => showUnsupportedModal('切换 IP', '当前未接管 EC20 数据网络，因此无法真实触发拨号重连或公网 IP 切换。'))
 els.rebootBtn.addEventListener('click', rebootModem)
-els.networkSelectBtn.addEventListener('click', () => showToast('SimRelay 当前未接管网络选择'))
-els.flightModeBtn.addEventListener('click', () => showToast('SimRelay 当前未接管飞行模式'))
+els.networkSelectBtn.addEventListener('click', () => showUnsupportedModal('网络选择设置', '当前仅透传 AT 控制，暂未持久化运营商选择策略。'))
+els.flightModeBtn.addEventListener('click', () => showUnsupportedModal('飞行模式', '当前未开放飞行模式开关，避免影响真实 EC20 在线状态。'))
 els.quickAT.addEventListener('change', () => {
   els.atCommand.value = els.quickAT.value
 })
@@ -878,16 +1087,44 @@ els.clearLogsBtn.addEventListener('click', () => {
   renderLogs()
 })
 els.exportLogsBtn.addEventListener('click', exportLogs)
-els.updateCredentialBtn.addEventListener('click', () => showToast('SimRelay 当前通过环境变量配置登录凭证'))
+els.credentialForm.addEventListener('submit', (event) => {
+  event.preventDefault()
+  openModal({
+    title: '更新凭证',
+    subtitle: '当前使用环境变量配置',
+    body: '<p>请通过 Docker 环境变量 <code>SIMRELAY_ADMIN_USERNAME</code> 和 <code>SIMRELAY_ADMIN_PASSWORD</code> 管理登录凭证。页面已保留同款入口，后续可接入配置存储后直接保存。</p>',
+  })
+})
 els.saveNotifyBtn.addEventListener('click', async () => {
   const data = await api('/settings', { method: 'PUT', body: JSON.stringify({ notify: {} }) })
   showToast(data.message || '保存成功', 'success')
 })
-els.addProxyBtn.addEventListener('click', () => showToast('SimRelay 当前未接管 VoWiFi 代理'))
+els.addProxyBtn.addEventListener('click', () => showUnsupportedModal('新增代理', '当前未接管 VoWiFi 或数据网络代理链路，因此代理配置仅保留入口。'))
+els.openApiDocsBtn.addEventListener('click', () =>
+  openModal({
+    title: 'API 文档',
+    subtitle: 'SimRelay 兼容接口',
+    body: '<p>当前内置 API 包括 <code>/api/devices</code>、<code>/api/sms/contacts</code>、<code>/api/sms/thread</code>、<code>/api/sms/send</code>、<code>/api/devices/{id}/actions/at</code>、<code>/api/devices/{id}/actions/ussd</code>。</p>',
+  }),
+)
+$$('[data-proxy-tab]').forEach((button) => button.addEventListener('click', () => setProxyTab(button.dataset.proxyTab)))
+$$('[data-notify-tab]').forEach((button) => button.addEventListener('click', () => setNotifyTab(button.dataset.notifyTab)))
+els.telegramEnabled.addEventListener('change', toggleNotifyInputs)
+els.modalCloseBtn.addEventListener('click', closeModal)
+els.modalBackdrop.addEventListener('click', (event) => {
+  if (event.target === els.modalBackdrop) closeModal()
+})
+window.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') closeModal()
+})
+window.addEventListener('resize', () => {
+  if (state.route === 'sms') renderSMSMode()
+})
 window.addEventListener('hashchange', () => {
   const route = normalizeRoute(location.hash.replace('#/', '') || 'dashboard')
   if (route !== state.route) navigate(route)
 })
 
 updateEncoding()
+toggleNotifyInputs()
 showApp()
