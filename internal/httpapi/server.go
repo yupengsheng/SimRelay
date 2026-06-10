@@ -547,7 +547,15 @@ func (s *Server) deviceFromStatus(status modem.DeviceStatus) map[string]any {
 	if status.IMEI != "" {
 		deviceID = "ec20-" + tail(status.IMEI, 6)
 	}
-	dbm := rssiToDBM(status.SignalRSSI)
+	dbm := status.SignalDBM
+	if dbm == 0 {
+		dbm = rssiToDBM(status.SignalRSSI)
+	}
+	if status.BackendMode == "" {
+		status.BackendMode = "at"
+	}
+	deviceInterface := firstNonEmpty(status.Interface, os.Getenv("SIMRELAY_NET_INTERFACE"), os.Getenv("SIMRELAY_DEVICE"))
+	controlDevice := firstNonEmpty(status.ControlDevice, os.Getenv("SIMRELAY_QMI_DEVICE"))
 	return map[string]any{
 		"id":                       deviceID,
 		"name":                     firstNonEmpty(status.Model, "EC20"),
@@ -561,41 +569,46 @@ func (s *Server) deviceFromStatus(status modem.DeviceStatus) map[string]any {
 		"lifecycle_phase":          "online",
 		"lifecycle_reason":         "control_online",
 		"public_ip":                "",
-		"interface":                os.Getenv("SIMRELAY_DEVICE"),
+		"interface":                deviceInterface,
 		"usb_path":                 "",
-		"control_device":           "",
+		"control_device":           controlDevice,
 		"apn":                      "",
-		"esim_transport":           "at",
+		"esim_transport":           status.BackendMode,
 		"sms_enabled":              true,
-		"network_enabled":          false,
+		"network_enabled":          status.BackendMode == "qmi",
 		"vowifi_enabled":           false,
-		"network_connected":        false,
+		"network_connected":        status.PSAttached,
 		"registration_state_label": registrationLabel(status.Registered),
-		"backend_mode":             "at",
+		"backend_mode":             status.BackendMode,
 		"at_port":                  os.Getenv("SIMRELAY_DEVICE"),
 		"modem": map[string]any{
-			"operator":        "",
-			"native_spn":      "",
-			"network_mode":    "LTE",
-			"network_duplex":  "",
-			"radio_band":      "",
-			"radio_channel":   0,
-			"signal_dbm":      dbm,
-			"signal_sinr":     0,
-			"imei":            status.IMEI,
-			"iccid":           "",
-			"imsi":            "",
-			"local_phone":     "",
-			"home_operator":   "",
-			"firmware":        "",
-			"reg_status":      boolToRegStatus(status.Registered),
-			"reg_status_text": registrationLabel(status.Registered),
-			"ps_attached":     status.Registered,
-			"manufacturer":    status.Manufacturer,
-			"model":           status.Model,
-			"sim":             status.SIM,
-			"signal_rssi":     status.SignalRSSI,
-			"signal_ber":      status.SignalBER,
+			"operator":          status.Operator,
+			"native_spn":        status.NativeSPN,
+			"native_mcc":        status.NativeMCC,
+			"native_mnc":        status.NativeMNC,
+			"network_mode":      firstNonEmpty(status.NetworkMode, "LTE"),
+			"network_duplex":    status.NetworkDuplex,
+			"radio_band":        status.RadioBand,
+			"radio_channel":     status.RadioChannel,
+			"signal_dbm":        dbm,
+			"signal_sinr":       status.SignalSINR,
+			"imei":              status.IMEI,
+			"iccid":             status.ICCID,
+			"imsi":              status.IMSI,
+			"local_phone":       status.LocalPhone,
+			"home_operator":     status.HomeOperator,
+			"firmware":          status.Firmware,
+			"firmware_revision": status.Firmware,
+			"reg_status":        boolToRegStatus(status.Registered),
+			"reg_status_text":   registrationLabel(status.Registered),
+			"ps_attached":       status.PSAttached || status.Registered,
+			"manufacturer":      status.Manufacturer,
+			"model":             status.Model,
+			"sim":               status.SIM,
+			"signal_rssi":       status.SignalRSSI,
+			"signal_ber":        status.SignalBER,
+			"qmi_available":     status.QMIAvailable,
+			"qmi_error":         status.QMIError,
 		},
 	}
 }

@@ -15,8 +15,14 @@ services:
       SIMRELAY_SENT_SMS_STORE: /var/lib/simrelay/sent-sms.json
       SIMRELAY_READ_SMS_STORE: /var/lib/simrelay/read-sms.json
       SIMRELAY_VOHIVE_DB: /var/lib/vohive/vohive.db
+      SIMRELAY_QMI_DEVICE: /dev/cdc-wdm0
+      SIMRELAY_NET_INTERFACE: wwp0s26f7u1i4
+      SIMRELAY_QMI_TIMEOUT: 1s
+      SIMRELAY_QMI_CACHE_TTL: 15s
+      SIMRELAY_QMI_PROXY: "false"
     devices:
       - /dev/ttyUSB3:/dev/ttyUSB3
+      - /dev/cdc-wdm0:/dev/cdc-wdm0
     ports:
       - "7576:7575"
     volumes:

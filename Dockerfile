@@ -15,12 +15,14 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/simrela
 
 FROM alpine:3.22
 
-RUN apk add --no-cache ca-certificates tzdata
+RUN apk add --no-cache ca-certificates tzdata qmi-utils
 
 ENV TZ=Asia/Shanghai \
     SIMRELAY_LISTEN=:7575 \
     SIMRELAY_BAUD=115200 \
-    SIMRELAY_TIMEOUT=5s
+    SIMRELAY_TIMEOUT=5s \
+    SIMRELAY_QMI_TIMEOUT=1s \
+    SIMRELAY_QMI_CACHE_TTL=15s
 
 COPY --from=builder /out/simrelay /usr/local/bin/simrelay
 

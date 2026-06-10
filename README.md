@@ -62,6 +62,11 @@ go build -o simrelay ./cmd/simrelay
 | `SIMRELAY_SENT_SMS_STORE` | 空 | 可选，保存本地已发送短信记录的 JSON 文件路径 |
 | `SIMRELAY_READ_SMS_STORE` | 空 | 可选，保存短信会话已读水位的 JSON 文件路径 |
 | `SIMRELAY_VOHIVE_DB` | 空 | 可选，只读读取 VoHive SQLite 短信库，用于展示 QMI 收到但 AT 存储中不可见的短信 |
+| `SIMRELAY_QMI_DEVICE` | 空 | 可选，QMI 控制设备路径，例如 `/dev/cdc-wdm0`，用于补齐运营商、网络制式、频段和信号详情 |
+| `SIMRELAY_NET_INTERFACE` | 空 | 可选，蜂窝网卡名，例如 `wwp0s26f7u1i4` |
+| `SIMRELAY_QMI_TIMEOUT` | `1s` | 单条 `qmicli` 查询超时时间 |
+| `SIMRELAY_QMI_CACHE_TTL` | `15s` | QMI 状态缓存时间，避免页面刷新时频繁访问模组 |
+| `SIMRELAY_QMI_PROXY` | `false` | 是否让 `qmicli` 使用 `--device-open-proxy` |
 
 ## Web 控制台
 
@@ -81,7 +86,7 @@ http://127.0.0.1:7575/
 
 ## Docker 部署
 
-本仓库提供 `Dockerfile` 和 `docker-compose.yml`。EC20 AT 串口必须映射进容器。当前 Docker VM 实机验证可用的 AT 口是 `/dev/ttyUSB3`，宿主机端口使用 `7576`，避免和现有 VoHive 的 `7575` 冲突。Compose 默认把本地已发送短信记录写入 `simrelay-data` 卷内的 `/var/lib/simrelay/sent-sms.json`，用于补齐 EC20 不保存已发送短信时的会话记录；同时只读挂载 VoHive 的 `/home/yupengsheng/vohive-docker/data`，用于展示 QMI 收到但 AT 短信存储不可见的短信。
+本仓库提供 `Dockerfile` 和 `docker-compose.yml`。EC20 AT 串口必须映射进容器；如果需要像 VoHive 一样显示运营商、SIM 身份、LTE 频段、信道、dBm 和 SINR，还需要映射 QMI 控制设备 `/dev/cdc-wdm0`。当前 Docker VM 实机验证可用的 AT 口是 `/dev/ttyUSB3`，宿主机端口使用 `7576`，避免和现有 VoHive 的 `7575` 冲突。Compose 默认把本地已发送短信记录写入 `simrelay-data` 卷内的 `/var/lib/simrelay/sent-sms.json`，用于补齐 EC20 不保存已发送短信时的会话记录；同时只读挂载 VoHive 的 `/home/yupengsheng/vohive-docker/data`，用于展示 QMI 收到但 AT 短信存储不可见的短信。
 
 ```bash
 docker compose up -d --build
@@ -100,10 +105,11 @@ docker compose up -d
 
 ```bash
 ls -l /dev/ttyUSB*
+ls -l /dev/cdc-wdm0
 sudo systemctl stop ModemManager
 ```
 
-如果串口不是 `/dev/ttyUSB3`，同步修改 `docker-compose.yml` 中的 `SIMRELAY_DEVICE` 和 `devices` 映射。如果宿主机没有其他服务占用 `7575`，也可以把端口映射改回 `7575:7575`。
+如果串口不是 `/dev/ttyUSB3`，同步修改 `docker-compose.yml` 中的 `SIMRELAY_DEVICE` 和 `devices` 映射。如果 QMI 设备不是 `/dev/cdc-wdm0`，同步修改 `SIMRELAY_QMI_DEVICE` 和设备映射。QMI 当前使用 `qmicli` 做非阻断增强：查询失败或被其他服务占用时，HTTP 接口仍会返回 AT 可用状态，并在设备详情里保留 `qmi_error` 便于排查。如果宿主机没有其他服务占用 `7575`，也可以把端口映射改回 `7575:7575`。
 
 ## HTTP API
 

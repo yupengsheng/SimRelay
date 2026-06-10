@@ -144,7 +144,27 @@ func TestVoHiveLogin(t *testing.T) {
 }
 
 func TestVoHiveDevices(t *testing.T) {
-	server := New(&fakeModem{status: modem.DeviceStatus{Manufacturer: "Quectel", Model: "EC20F", IMEI: "865860049674642", SIM: "READY", SignalRSSI: 30, Registered: true}})
+	server := New(&fakeModem{status: modem.DeviceStatus{
+		Manufacturer:  "Quectel",
+		Model:         "EC20F",
+		IMEI:          "865860049674642",
+		ICCID:         "8944110069316673105",
+		IMSI:          "234102156572007",
+		SIM:           "READY",
+		Operator:      "中国移动",
+		NativeSPN:     "giffgaff",
+		NetworkMode:   "LTE",
+		NetworkDuplex: "FDD",
+		RadioBand:     "LTE BAND 122",
+		RadioChannel:  1300,
+		SignalRSSI:    30,
+		SignalDBM:     -50,
+		SignalSINR:    16,
+		Registered:    true,
+		PSAttached:    true,
+		BackendMode:   "qmi",
+		QMIAvailable:  true,
+	}})
 	req := httptest.NewRequest(http.MethodGet, "/api/devices", nil)
 	rec := httptest.NewRecorder()
 
@@ -153,7 +173,12 @@ func TestVoHiveDevices(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d", rec.Code)
 	}
-	if !bytes.Contains(rec.Body.Bytes(), []byte(`"devices"`)) || !bytes.Contains(rec.Body.Bytes(), []byte(`EC20F`)) {
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"devices"`)) ||
+		!bytes.Contains(rec.Body.Bytes(), []byte(`EC20F`)) ||
+		!bytes.Contains(rec.Body.Bytes(), []byte(`中国移动`)) ||
+		!bytes.Contains(rec.Body.Bytes(), []byte(`giffgaff`)) ||
+		!bytes.Contains(rec.Body.Bytes(), []byte(`LTE BAND 122`)) ||
+		!bytes.Contains(rec.Body.Bytes(), []byte(`8944110069316673105`)) {
 		t.Fatalf("body = %s", rec.Body.String())
 	}
 }

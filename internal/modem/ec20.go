@@ -25,13 +25,34 @@ func NewEC20(client ATClient) *EC20 {
 }
 
 type DeviceStatus struct {
-	Manufacturer string `json:"manufacturer"`
-	Model        string `json:"model"`
-	IMEI         string `json:"imei"`
-	SIM          string `json:"sim"`
-	SignalRSSI   int    `json:"signal_rssi"`
-	SignalBER    int    `json:"signal_ber"`
-	Registered   bool   `json:"registered"`
+	Manufacturer  string `json:"manufacturer"`
+	Model         string `json:"model"`
+	Firmware      string `json:"firmware,omitempty"`
+	IMEI          string `json:"imei"`
+	ICCID         string `json:"iccid,omitempty"`
+	IMSI          string `json:"imsi,omitempty"`
+	LocalPhone    string `json:"local_phone,omitempty"`
+	SIM           string `json:"sim"`
+	Operator      string `json:"operator,omitempty"`
+	NativeSPN     string `json:"native_spn,omitempty"`
+	NativeMCC     string `json:"native_mcc,omitempty"`
+	NativeMNC     string `json:"native_mnc,omitempty"`
+	HomeOperator  string `json:"home_operator,omitempty"`
+	NetworkMode   string `json:"network_mode,omitempty"`
+	NetworkDuplex string `json:"network_duplex,omitempty"`
+	RadioBand     string `json:"radio_band,omitempty"`
+	RadioChannel  int    `json:"radio_channel,omitempty"`
+	SignalRSSI    int    `json:"signal_rssi"`
+	SignalBER     int    `json:"signal_ber"`
+	SignalDBM     int    `json:"signal_dbm,omitempty"`
+	SignalSINR    int    `json:"signal_sinr,omitempty"`
+	Registered    bool   `json:"registered"`
+	PSAttached    bool   `json:"ps_attached,omitempty"`
+	Interface     string `json:"interface,omitempty"`
+	ControlDevice string `json:"control_device,omitempty"`
+	BackendMode   string `json:"backend_mode,omitempty"`
+	QMIAvailable  bool   `json:"qmi_available,omitempty"`
+	QMIError      string `json:"qmi_error,omitempty"`
 }
 
 type MessageBox string
@@ -111,7 +132,33 @@ func (m *EC20) DeviceStatus() (DeviceStatus, error) {
 	} else if err := parseCREG(value, &status); err != nil {
 		return status, err
 	}
+	m.enrichDeviceStatus(&status)
+	if status.BackendMode == "" {
+		status.BackendMode = "at"
+	}
 	return status, nil
+}
+
+func (m *EC20) enrichDeviceStatus(status *DeviceStatus) {
+	if value, err := firstLine(m.at.Command("AT+COPS?")); err == nil {
+		parseCOPS(value, status)
+	}
+	if value, err := firstLine(m.at.Command("AT+QCCID")); err == nil {
+		parseQCCID(value, status)
+	}
+	if value, err := firstLine(m.at.Command("AT+CIMI")); err == nil {
+		parseCIMI(value, status)
+	}
+	if value, err := firstLine(m.at.Command("AT+QSPN")); err == nil {
+		parseQSPN(value, status)
+	}
+	if value, err := firstLine(m.at.Command("AT+QNWINFO")); err == nil {
+		parseQNWINFO(value, status)
+	}
+	if value, err := firstLine(m.at.Command("AT+CGMR")); err == nil {
+		status.Firmware = strings.TrimSpace(value)
+	}
+	deriveSIMIdentity(status)
 }
 
 func (m *EC20) ListMessages(box MessageBox) ([]Message, error) {
@@ -275,6 +322,87 @@ func parseCREG(line string, status *DeviceStatus) error {
 	return nil
 }
 
+func parseCOPS(line string, status *DeviceStatus) {
+	values := strings.TrimSpace(strings.TrimPrefix(line, "+COPS:"))
+	parts := splitCSV(values)
+	if len(parts) < 3 {
+		return
+	}
+	format := strings.TrimSpace(parts[1])
+	operator := unquote(parts[2])
+	if format == "2" {
+		if len(operator) >= 5 {
+			status.Operator = operatorFromMCCMNC(operator[:3], operator[3:])
+		}
+	} else {
+		status.Operator = normalizeOperatorName(operator)
+	}
+	if len(parts) >= 4 {
+		status.NetworkMode = networkModeFromAccessTechnology(strings.TrimSpace(parts[3]))
+	}
+}
+
+func parseQCCID(line string, status *DeviceStatus) {
+	value := strings.TrimSpace(strings.TrimPrefix(line, "+QCCID:"))
+	value = strings.Trim(value, `"'`)
+	if value != "" {
+		status.ICCID = normalizeICCID(value)
+	}
+}
+
+func parseCIMI(line string, status *DeviceStatus) {
+	value := strings.TrimSpace(line)
+	if value != "" && allDigits(value) {
+		status.IMSI = value
+	}
+}
+
+func parseQSPN(line string, status *DeviceStatus) {
+	values := strings.TrimSpace(strings.TrimPrefix(line, "+QSPN:"))
+	parts := splitCSV(values)
+	for _, part := range parts {
+		value := strings.TrimSpace(unquote(part))
+		if value == "" || value == "0" || value == "1" {
+			continue
+		}
+		status.NativeSPN = value
+		if status.HomeOperator == "" {
+			status.HomeOperator = normalizeOperatorName(value)
+		}
+		return
+	}
+}
+
+func parseQNWINFO(line string, status *DeviceStatus) {
+	values := strings.TrimSpace(strings.TrimPrefix(line, "+QNWINFO:"))
+	parts := splitCSV(values)
+	if len(parts) < 4 {
+		return
+	}
+	mode := strings.ToUpper(unquote(parts[0]))
+	switch {
+	case strings.Contains(mode, "LTE"):
+		status.NetworkMode = "LTE"
+	case strings.Contains(mode, "WCDMA") || strings.Contains(mode, "UMTS"):
+		status.NetworkMode = "UMTS"
+	case strings.Contains(mode, "GSM"):
+		status.NetworkMode = "GSM"
+	}
+	if strings.Contains(mode, "FDD") {
+		status.NetworkDuplex = "FDD"
+	} else if strings.Contains(mode, "TDD") {
+		status.NetworkDuplex = "TDD"
+	}
+	plmn := unquote(parts[1])
+	if status.Operator == "" && len(plmn) >= 5 {
+		status.Operator = operatorFromMCCMNC(plmn[:3], plmn[3:])
+	}
+	status.RadioBand = unquote(parts[2])
+	if channel, err := strconv.Atoi(strings.TrimSpace(unquote(parts[3]))); err == nil {
+		status.RadioChannel = channel
+	}
+}
+
 func boxCode(box MessageBox) string {
 	switch box {
 	case BoxInbox:
@@ -367,4 +495,150 @@ func unquote(value string) string {
 		return value[1 : len(value)-1]
 	}
 	return value
+}
+
+func deriveSIMIdentity(status *DeviceStatus) {
+	if len(status.IMSI) >= 5 {
+		if status.NativeMCC == "" {
+			status.NativeMCC = status.IMSI[:3]
+		}
+		homeOperator, nativeMNC := homeOperatorFromIMSI(status.IMSI, status.NativeMNC)
+		if nativeMNC != "" {
+			status.NativeMNC = nativeMNC
+		}
+		if homeOperator != "" {
+			status.HomeOperator = homeOperator
+			if status.NativeSPN == "" || normalizeOperatorName(status.NativeSPN) == normalizeOperatorName(status.Operator) {
+				status.NativeSPN = homeOperator
+			}
+		}
+		if status.HomeOperator == "" {
+			status.HomeOperator = operatorFromMCCMNC(status.NativeMCC, status.NativeMNC)
+		}
+	}
+	if status.Operator == "" {
+		status.Operator = status.HomeOperator
+	}
+	if status.NetworkMode == "" && status.Registered {
+		status.NetworkMode = "LTE"
+	}
+	if status.SignalDBM == 0 && status.SignalRSSI > 0 {
+		status.SignalDBM = rssiToDBM(status.SignalRSSI)
+	}
+	if status.PSAttached == false && status.Registered {
+		status.PSAttached = true
+	}
+}
+
+func normalizeOperatorName(value string) string {
+	switch strings.ToLower(strings.TrimSpace(value)) {
+	case "", "unknown":
+		return ""
+	case "china mobile", "chinamobile", "cmcc", "46000", "46002", "46004", "46007", "46008":
+		return "中国移动"
+	case "china unicom", "chinaunicom", "cucc", "46001", "46006", "46009":
+		return "中国联通"
+	case "china telecom", "chinatelecom", "ctcc", "46003", "46005", "46011":
+		return "中国电信"
+	default:
+		return strings.TrimSpace(value)
+	}
+}
+
+func operatorFromMCCMNC(mcc string, mnc string) string {
+	mcc = strings.TrimSpace(mcc)
+	mnc = strings.TrimSpace(mnc)
+	if mcc == "460" && len(mnc) == 1 {
+		mnc = "0" + mnc
+	}
+	switch mcc + mnc {
+	case "46000", "46002", "46004", "46007", "46008":
+		return "中国移动"
+	case "46001", "46006", "46009":
+		return "中国联通"
+	case "46003", "46005", "46011":
+		return "中国电信"
+	case "23410":
+		return "giffgaff"
+	case "23415":
+		return "Vodafone UK"
+	case "23420":
+		return "Three UK"
+	case "23430", "23433":
+		return "EE"
+	default:
+		return ""
+	}
+}
+
+func homeOperatorFromIMSI(imsi string, currentMNC string) (string, string) {
+	if len(imsi) < 5 {
+		return "", strings.TrimSpace(currentMNC)
+	}
+	mcc := imsi[:3]
+	candidates := []string{strings.TrimSpace(currentMNC), imsi[3:5]}
+	if len(imsi) >= 6 {
+		candidates = append(candidates, imsi[3:6])
+	}
+	for _, mnc := range candidates {
+		if mnc == "" {
+			continue
+		}
+		if operator := operatorFromMCCMNC(mcc, mnc); operator != "" {
+			return operator, normalizeMNC(mnc)
+		}
+	}
+	if currentMNC != "" {
+		return "", normalizeMNC(currentMNC)
+	}
+	return "", imsi[3:5]
+}
+
+func normalizeMNC(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) == 1 {
+		return "0" + value
+	}
+	return value
+}
+
+func normalizeICCID(value string) string {
+	value = strings.TrimSpace(value)
+	value = strings.TrimRight(value, "Ff")
+	return value
+}
+
+func networkModeFromAccessTechnology(value string) string {
+	switch strings.TrimSpace(value) {
+	case "0":
+		return "GSM"
+	case "2":
+		return "UMTS"
+	case "7":
+		return "LTE"
+	default:
+		return ""
+	}
+}
+
+func allDigits(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func rssiToDBM(rssi int) int {
+	if rssi <= 0 || rssi == 99 {
+		return 0
+	}
+	if rssi > 31 {
+		return rssi
+	}
+	return -113 + 2*rssi
 }
