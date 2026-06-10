@@ -52,19 +52,32 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", s.healthz)
 	s.mux.HandleFunc("POST /api/auth/login", s.login)
+	s.mux.HandleFunc("GET /api/dashboard/devices", s.dashboardDevices)
 	s.mux.HandleFunc("GET /api/devices", s.vohiveDevices)
+	s.mux.HandleFunc("POST /api/devices", s.unsupportedAction)
 	s.mux.HandleFunc("GET /api/devices/", s.vohiveDeviceRoute)
 	s.mux.HandleFunc("POST /api/devices/", s.vohiveDeviceRoute)
 	s.mux.HandleFunc("PATCH /api/devices/", s.vohiveDeviceRoute)
 	s.mux.HandleFunc("PUT /api/devices/", s.vohiveDeviceRoute)
 	s.mux.HandleFunc("DELETE /api/devices/", s.vohiveDeviceRoute)
 	s.mux.HandleFunc("POST /api/devices/actions/rescan", s.acceptedAction)
+	s.mux.HandleFunc("GET /api/devices/discovered", s.discoveredDevices)
+	s.mux.HandleFunc("POST /api/device-mgmt/discovered/fix-usbnet", s.unsupportedAction)
 	s.mux.HandleFunc("GET /api/sms/contacts", s.vohiveSMSContacts)
 	s.mux.HandleFunc("GET /api/sms/thread", s.vohiveSMSThread)
 	s.mux.HandleFunc("POST /api/sms/send", s.vohiveSMSSend)
 	s.mux.HandleFunc("DELETE /api/sms/messages/", s.vohiveSMSDeleteMessage)
 	s.mux.HandleFunc("DELETE /api/sms/thread", s.vohiveSMSDeleteThread)
 	s.mux.HandleFunc("GET /api/traffic/analysis", s.trafficAnalysis)
+	s.mux.HandleFunc("GET /api/logs", s.logs)
+	s.mux.HandleFunc("GET /api/logs/stream", s.logsStream)
+	s.mux.HandleFunc("GET /api/settings", s.settings)
+	s.mux.HandleFunc("PUT /api/settings", s.saveSettings)
+	s.mux.HandleFunc("POST /api/settings/password", s.unsupportedAction)
+	s.mux.HandleFunc("GET /api/proxies", s.proxyList)
+	s.mux.HandleFunc("POST /api/proxies", s.unsupportedAction)
+	s.mux.HandleFunc("GET /api/proxy", s.proxyList)
+	s.mux.HandleFunc("POST /api/proxy", s.unsupportedAction)
 	s.mux.HandleFunc("POST /api/rotateip", s.unsupportedAction)
 	s.mux.HandleFunc("GET /api/v1/device", s.device)
 	s.mux.HandleFunc("GET /api/v1/messages", s.listMessages)
@@ -166,6 +179,15 @@ func (s *Server) vohiveDevices(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]any{"devices": []any{s.deviceFromStatus(status)}})
 }
 
+func (s *Server) dashboardDevices(w http.ResponseWriter, _ *http.Request) {
+	status, err := s.modem.DeviceStatus()
+	if err != nil {
+		writeVoHiveError(w, statusForError(err), "读取仪表盘失败")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"devices": []any{s.deviceFromStatus(status)}})
+}
+
 func (s *Server) vohiveDeviceRoute(w http.ResponseWriter, r *http.Request) {
 	parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/devices/"), "/")
 	if len(parts) == 0 || parts[0] == "" {
@@ -180,6 +202,8 @@ func (s *Server) vohiveDeviceRoute(w http.ResponseWriter, r *http.Request) {
 	switch strings.Join(parts[1:], "/") {
 	case "overview":
 		s.vohiveDeviceOverview(w, r)
+	case "overview/stream":
+		s.overviewStream(w, r)
 	case "config":
 		s.deviceConfig(w, deviceID)
 	case "actions/at":
@@ -201,6 +225,8 @@ func (s *Server) vohiveDeviceRoute(w http.ResponseWriter, r *http.Request) {
 		s.unsupportedAction(w, r)
 	case "esim", "esim/profiles", "esim/notifications":
 		writeJSON(w, http.StatusOK, map[string]any{"chip_info": nil, "profiles": []any{}, "items": []any{}})
+	case "esim/notifications/actions/retry":
+		s.unsupportedAction(w, r)
 	default:
 		writeVoHiveError(w, http.StatusNotFound, "API 不存在")
 	}
@@ -219,14 +245,55 @@ func (s *Server) deviceConfig(w http.ResponseWriter, deviceID string) {
 	writeJSON(w, http.StatusOK, map[string]any{
 		"config": map[string]any{
 			"id":              deviceID,
-			"name":            deviceID,
+			"name":            firstNonEmpty(os.Getenv("SIMRELAY_DEVICE_NAME"), deviceID),
+			"interface":       os.Getenv("SIMRELAY_DEVICE"),
+			"modem_imei":      "",
+			"usb_path":        "",
+			"apn":             "",
 			"device_backend":  "at",
 			"at_port":         os.Getenv("SIMRELAY_DEVICE"),
+			"control_device":  "",
 			"network_enabled": false,
 			"vowifi_enabled":  false,
 			"esim_transport":  "at",
 		},
 	})
+}
+
+func (s *Server) discoveredDevices(w http.ResponseWriter, _ *http.Request) {
+	device := os.Getenv("SIMRELAY_DEVICE")
+	if device == "" {
+		device = "/dev/ttyUSB2"
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"devices": []map[string]any{
+			{
+				"discovery_key":      device,
+				"control_path":       "",
+				"net_interface":      device,
+				"usb_path":           "",
+				"vendor_id":          0,
+				"product_id":         0,
+				"driver_name":        "usbserial",
+				"at_ports":           []string{device},
+				"at_port":            device,
+				"mode":               "at",
+				"network_capable":    false,
+				"configured":         true,
+				"configured_id":      "simrelay",
+				"path_configured_id": "simrelay",
+				"match_kind":         "simrelay",
+			},
+		},
+	})
+}
+
+func (s *Server) overviewStream(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("event: overview\n"))
+	_, _ = w.Write([]byte(`data: {"devices":[]}` + "\n\n"))
 }
 
 func (s *Server) vohiveSMSContacts(w http.ResponseWriter, r *http.Request) {
@@ -364,7 +431,64 @@ func (s *Server) sendUSSD(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) trafficAnalysis(w http.ResponseWriter, _ *http.Request) {
-	writeJSON(w, http.StatusOK, map[string]any{"buckets": []any{}, "chart": nil})
+	now := time.Now().Truncate(time.Hour)
+	buckets := make([]map[string]any, 0, 24)
+	for i := 23; i >= 0; i-- {
+		buckets = append(buckets, map[string]any{
+			"bucket":      now.Add(-time.Duration(i) * time.Hour).Format("2006-01-02 15:04"),
+			"rx_bytes":    0,
+			"tx_bytes":    0,
+			"total_bytes": 0,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"buckets": buckets, "chart": nil})
+}
+
+func (s *Server) logs(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"logs": []map[string]any{s.logEntry("INFO", "SimRelay 控制台已启动")}})
+}
+
+func (s *Server) logsStream(w http.ResponseWriter, _ *http.Request) {
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.WriteHeader(http.StatusOK)
+	payload, _ := json.Marshal(s.logEntry("INFO", "SimRelay 日志流已连接"))
+	_, _ = w.Write([]byte("event: log\n"))
+	_, _ = w.Write([]byte("data: " + string(payload) + "\n\n"))
+}
+
+func (s *Server) settings(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{
+		"version":     "simrelay",
+		"build_time":  time.Now().Format(time.RFC3339),
+		"config_path": "environment",
+		"notify": map[string]any{
+			"telegram": map[string]any{"enabled": false},
+			"feishu":   map[string]any{"enabled": false},
+			"qq":       map[string]any{"enabled": false},
+			"bark":     map[string]any{"enabled": false},
+			"email":    map[string]any{"enabled": false},
+			"pushplus": map[string]any{"enabled": false},
+			"webhook":  map[string]any{"enabled": false},
+		},
+	})
+}
+
+func (s *Server) saveSettings(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "message": "SimRelay 当前仅支持环境变量配置"})
+}
+
+func (s *Server) proxyList(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusOK, map[string]any{"proxies": []any{}, "items": []any{}})
+}
+
+func (s *Server) logEntry(level string, message string) map[string]any {
+	return map[string]any{
+		"ts":      time.Now().Format("2006-01-02 15:04:05"),
+		"level":   level,
+		"source":  "simrelay/httpapi",
+		"message": message,
+	}
 }
 
 func (s *Server) acceptedAction(w http.ResponseWriter, _ *http.Request) {
@@ -395,6 +519,9 @@ func (s *Server) deviceFromStatus(status modem.DeviceStatus) map[string]any {
 		"lifecycle_reason":         "control_online",
 		"public_ip":                "",
 		"interface":                os.Getenv("SIMRELAY_DEVICE"),
+		"usb_path":                 "",
+		"control_device":           "",
+		"apn":                      "",
 		"esim_transport":           "at",
 		"sms_enabled":              true,
 		"network_enabled":          false,
@@ -414,6 +541,10 @@ func (s *Server) deviceFromStatus(status modem.DeviceStatus) map[string]any {
 			"signal_sinr":     0,
 			"imei":            status.IMEI,
 			"iccid":           "",
+			"imsi":            "",
+			"local_phone":     "",
+			"home_operator":   "",
+			"firmware":        "",
 			"reg_status":      boolToRegStatus(status.Registered),
 			"reg_status_text": registrationLabel(status.Registered),
 			"ps_attached":     status.Registered,

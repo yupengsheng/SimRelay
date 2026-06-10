@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>SimRelay</title>
+    <title>VoHive</title>
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet" />
@@ -19,9 +19,9 @@
 
     <section id="loginView" class="login-view hidden">
       <form id="loginForm" class="login-card">
-        <div class="login-mark">S</div>
-        <h1>SimRelay</h1>
-        <p>登录短信与设备控制台</p>
+        <div class="login-mark">VH</div>
+        <h1>VoHive</h1>
+        <p>4G 模组管理后台</p>
         <label>
           <span>账号</span>
           <input id="loginUsername" autocomplete="username" value="admin" />
@@ -37,31 +37,42 @@
     <div id="app" class="app-shell hidden">
       <aside class="sidebar">
         <div class="brand">
-          <div class="brand-mark">S</div>
+          <div class="brand-mark">V</div>
           <div>
-            <div class="brand-title">SimRelay</div>
-            <div class="brand-subtitle">EC20 Control Plane</div>
+            <div class="brand-title">VoHive</div>
           </div>
         </div>
 
         <nav class="nav" aria-label="主导航">
-          <button class="nav-item active" type="button" data-route="sms">
-            <span class="nav-icon">✉</span><span>短信</span>
+          <button class="nav-item active" type="button" data-route="dashboard">
+            <span class="nav-icon">⊞</span><span>仪表盘</span>
           </button>
           <button class="nav-item" type="button" data-route="devices">
-            <span class="nav-icon">▣</span><span>设备管理</span>
+            <span class="nav-icon">▯</span><span>设备管理</span>
           </button>
-          <button class="nav-item disabled" type="button" data-route="proxy">
-            <span class="nav-icon">⇄</span><span>代理</span>
+          <button class="nav-item" type="button" data-route="proxy">
+            <span class="nav-icon">◎</span><span>代理管理</span>
           </button>
-          <button class="nav-item disabled" type="button" data-route="logs">
-            <span class="nav-icon">⌘</span><span>日志</span>
+          <button class="nav-item" type="button" data-route="sms">
+            <span class="nav-icon">✉</span><span>短信中心</span>
+          </button>
+          <button class="nav-item" type="button" data-route="logs">
+            <span class="nav-icon">▤</span><span>实时日志</span>
+          </button>
+          <button class="nav-item" type="button" data-route="settings">
+            <span class="nav-icon">⚙</span><span>系统设置</span>
           </button>
         </nav>
 
         <div class="sidebar-footer">
-          <div class="side-status"><span id="sideDot" class="status-dot"></span><span id="sideStatus">等待刷新</span></div>
-          <button id="logoutBtn" class="ghost-btn" type="button">退出登录</button>
+          <div class="user-card">
+            <div class="user-avatar">A</div>
+            <div>
+              <strong>Admin</strong>
+              <span>Administrator</span>
+            </div>
+            <button id="logoutBtn" class="icon-btn logout-icon" type="button" aria-label="退出登录">↪</button>
+          </div>
         </div>
       </aside>
 
@@ -72,35 +83,62 @@
             <p id="pageSubtitle">按联系人查看短信会话，发送中文短信。</p>
           </div>
           <div class="header-actions">
+            <button id="refreshBtn" class="glass-btn route-action" type="button">刷新</button>
+            <button id="rescanBtn" class="glass-btn route-action hidden" type="button">重新扫描</button>
+            <button id="addDeviceBtn" class="primary-btn route-action hidden" type="button">添加设备</button>
+            <button id="newSmsBtn" class="primary-btn route-action hidden" type="button">新建短信</button>
             <button id="themeBtn" class="icon-btn" type="button" aria-label="切换主题">◐</button>
-            <button id="refreshBtn" class="glass-btn" type="button">刷新</button>
+            <span class="top-status" title="控制面在线"><span id="sideDot" class="status-dot"></span><span id="sideStatus">等待刷新</span></span>
           </div>
         </header>
 
-        <section id="smsView" class="view sms-page">
-          <div class="sms-card">
-            <aside class="device-column">
-              <div class="column-head">
-                <h2>设备</h2>
-                <select id="smsDeviceSelect" aria-label="短信设备"></select>
+        <section id="dashboardView" class="view dashboard-page">
+          <div class="stat-grid">
+            <article class="metric-card"><span>设备总数</span><strong id="totalDevices">0</strong></article>
+            <article class="metric-card"><span>在线</span><strong id="onlineDevices" class="success-text">0</strong></article>
+            <article class="metric-card"><span>离线</span><strong id="offlineDevices" class="danger-text">0</strong></article>
+            <article class="metric-card"><span>最近刷新</span><strong id="lastRefresh">--</strong></article>
+          </div>
+          <div id="dashboardDeviceCards" class="dashboard-devices"></div>
+          <section class="panel traffic-panel">
+            <div class="section-head">
+              <div>
+                <h2>流量分析</h2>
+                <p>数据每分钟采样一次，按日/周/月聚合</p>
               </div>
-              <div id="smsDeviceList" class="device-mini-list"></div>
-            </aside>
+              <div class="segmented">
+                <button class="segment active" type="button" data-range="day">日</button>
+                <button class="segment" type="button" data-range="week">周</button>
+                <button class="segment" type="button" data-range="month">月</button>
+              </div>
+            </div>
+            <div class="traffic-stats">
+              <article><span id="trafficRxLabel">本日下载</span><strong id="trafficRx">0 B</strong></article>
+              <article><span id="trafficTxLabel">本日上传</span><strong id="trafficTx">0 B</strong></article>
+              <article><span id="trafficTotalLabel">本日合计</span><strong id="trafficTotal">0 B</strong></article>
+            </div>
+            <div class="traffic-empty">暂无流量图表数据</div>
+            <table class="traffic-table">
+              <thead><tr><th>时间</th><th>下载</th><th>上传</th><th>合计</th></tr></thead>
+              <tbody id="trafficRows"></tbody>
+            </table>
+          </section>
+        </section>
 
-            <aside class="thread-column">
+        <section id="smsView" class="view sms-page hidden">
+          <div class="sms-card">
+            <aside id="smsThreadListView" class="thread-list-mode">
               <div class="column-head">
-                <div>
-                  <h2>联系人</h2>
-                  <p id="contactCount">0 个会话</p>
-                </div>
-                <input id="contactSearch" class="search-input" placeholder="搜索号码 / 内容" />
+                <select id="smsDeviceSelect" aria-label="短信设备"></select>
+                <input id="contactSearch" class="search-input" placeholder="搜索联系人/内容" />
               </div>
               <div id="contactList" class="contact-list"></div>
             </aside>
 
-            <section class="chat-column">
+            <section id="smsChatView" class="chat-column hidden">
               <div class="chat-head">
                 <div>
+                  <button id="backToThreadsBtn" class="text-btn" type="button">返回</button>
                   <h2 id="chatTitle">请选择会话</h2>
                   <p id="chatMeta">短信内容会显示在这里</p>
                 </div>
@@ -125,8 +163,12 @@
           <div class="devices-layout">
             <aside class="panel device-list-panel">
               <div class="column-head">
-                <h2>设备列表</h2>
-                <input id="deviceSearch" class="search-input" placeholder="搜索设备 / IMEI / 串口" />
+                <input id="deviceSearch" class="search-input" placeholder="搜索设备 / ICCID / IMEI / 网卡" />
+                <div class="device-filter-row">
+                  <select id="deviceStatusFilter" aria-label="设备状态"><option>全部状态</option><option>在线</option><option>离线</option></select>
+                  <select id="deviceSortField" aria-label="设备排序"><option>排序：名称</option><option>排序：信号</option></select>
+                  <select id="deviceSortDirection" aria-label="排序方向"><option>升序</option><option>降序</option></select>
+                </div>
               </div>
               <div id="deviceList" class="managed-device-list"></div>
             </aside>
@@ -134,42 +176,86 @@
             <section class="device-detail">
               <div class="panel device-hero">
                 <div>
-                  <div class="device-brand-icon">S</div>
+                  <div class="device-brand-icon">V</div>
                 </div>
                 <div class="device-hero-main">
                   <h2 id="deviceName">--</h2>
                   <p><span id="deviceId">--</span> · 公网 IP: <span id="publicIP">---</span></p>
                 </div>
                 <div class="device-actions">
-                  <button id="openSmsBtn" class="glass-btn" type="button">短信</button>
                   <button id="rotateIpBtn" class="glass-btn" type="button">切换 IP</button>
                   <button id="rebootBtn" class="danger-ghost-btn" type="button">重启模组</button>
+                  <button id="openSmsBtn" class="glass-btn" type="button">短信</button>
                 </div>
               </div>
 
               <div class="tabs">
                 <button class="tab active" type="button" data-tab="overview">概览</button>
+                <button class="tab" type="button" data-tab="esim">eSIM</button>
                 <button class="tab" type="button" data-tab="at">AT 终端</button>
                 <button class="tab" type="button" data-tab="ussd">USSD 终端</button>
                 <button class="tab" type="button" data-tab="config">配置</button>
               </div>
 
               <div id="overviewTab" class="tab-panel">
-                <div class="overview-grid">
-                  <article class="metric-card"><span>SIM</span><strong id="simValue">--</strong></article>
-                  <article class="metric-card"><span>驻网</span><strong id="regValue">--</strong></article>
-                  <article class="metric-card"><span>信号</span><strong id="signalValue">--</strong></article>
-                  <article class="metric-card"><span>短信</span><strong id="smsCountValue">--</strong></article>
+                <div class="overview-grid device-overview-grid">
+                  <article class="panel status-card">
+                    <span>运行状态</span>
+                    <strong id="operatorValue">--</strong>
+                    <p id="operatorSubValue">--</p>
+                    <button class="glass-btn inline-action" id="networkSelectBtn" type="button">网络选择设置</button>
+                  </article>
+                  <article class="panel status-card">
+                    <span>信号强度</span>
+                    <strong id="signalValue">--</strong>
+                    <p id="signalSubValue">RSSI / BER</p>
+                  </article>
+                  <article class="panel status-card">
+                    <span>网络模式</span>
+                    <strong id="networkModeValue">LTE</strong>
+                    <p><span>频段</span> <b id="bandValue">--</b> · <span>信道</span> <b id="channelValue">--</b></p>
+                  </article>
+                  <article class="panel status-card">
+                    <span>注册状态</span>
+                    <strong id="regValue">--</strong>
+                    <p id="simValue">SIM --</p>
+                  </article>
                 </div>
                 <div class="panel info-grid">
                   <dl>
-                    <div><dt>厂商</dt><dd id="manufacturerValue">--</dd></div>
-                    <div><dt>型号</dt><dd id="modelValue">--</dd></div>
+                    <div><dt>SIM / 设备</dt><dd id="manufacturerValue">--</dd></div>
                     <div><dt>IMEI</dt><dd id="imeiValue">--</dd></div>
-                    <div><dt>串口</dt><dd id="portValue">--</dd></div>
-                    <div><dt>网络模式</dt><dd id="networkModeValue">LTE</dd></div>
-                    <div><dt>BER</dt><dd id="berValue">--</dd></div>
+                    <div><dt>ICCID</dt><dd id="iccidValue">--</dd></div>
+                    <div><dt>IMSI</dt><dd id="imsiValue">--</dd></div>
+                    <div><dt>本机号码</dt><dd id="localNumberValue">--</dd></div>
+                    <div><dt>原运营商</dt><dd id="homeOperatorValue">--</dd></div>
+                    <div><dt>固件版本</dt><dd id="firmwareValue">--</dd></div>
+                    <div><dt>飞行模式</dt><dd><span id="flightModeValue">否</span> <button id="flightModeBtn" class="glass-btn inline-action" type="button">开启飞行模式</button></dd></div>
+                    <div><dt>运行模式</dt><dd id="backendModeValue">AT</dd></div>
+                    <div><dt>网络</dt><dd id="dataStateValue">数据未开启</dd></div>
                   </dl>
+                </div>
+                <div class="panel device-traffic-panel">
+                  <div class="section-head">
+                    <div>
+                      <h2>当前设备流量分析</h2>
+                      <p>数据每分钟采样一次，按日/周/月聚合</p>
+                    </div>
+                    <div class="segmented disabled-segmented">
+                      <button class="segment active" type="button" disabled>日</button>
+                      <button class="segment" type="button" disabled>周</button>
+                      <button class="segment" type="button" disabled>月</button>
+                    </div>
+                  </div>
+                  <div class="traffic-empty">网络已禁用，暂无流量分析</div>
+                </div>
+              </div>
+
+              <div id="esimTab" class="tab-panel hidden">
+                <div class="panel empty-module">
+                  <div class="empty-icon">∅</div>
+                  <h2>暂无 eSIM 配置</h2>
+                  <p>SimRelay 当前聚焦 EC20 短信和 AT 控制，暂不接管 eSIM Profile。</p>
                 </div>
               </div>
 
@@ -184,7 +270,9 @@
                       <option value="AT+CGSN">AT+CGSN</option>
                     </select>
                     <input id="atCommand" value="AT" />
-                    <button id="sendATBtn" class="primary-btn" type="button">执行</button>
+                    <input id="atTimeout" class="timeout-input" type="number" min="1" max="120" value="10" aria-label="AT 超时秒数" />
+                    <button id="clearATBtn" class="glass-btn" type="button">清空</button>
+                    <button id="sendATBtn" class="primary-btn" type="button">发送</button>
                   </div>
                   <pre id="atOutput" class="terminal-output">等待执行 AT 命令</pre>
                 </div>
@@ -194,7 +282,9 @@
                 <div class="panel terminal-panel">
                   <div class="terminal-toolbar">
                     <input id="ussdCode" placeholder="*100#" />
-                    <button id="sendUSSDBtn" class="primary-btn" type="button">发送 USSD</button>
+                    <input id="ussdTimeout" class="timeout-input" type="number" min="1" max="180" value="30" aria-label="USSD 超时秒数" />
+                    <button id="clearUSSDBtn" class="glass-btn" type="button">清空</button>
+                    <button id="sendUSSDBtn" class="primary-btn" type="button">发送</button>
                   </div>
                   <pre id="ussdOutput" class="terminal-output">等待发送 USSD</pre>
                 </div>
@@ -203,12 +293,107 @@
               <div id="configTab" class="tab-panel hidden">
                 <div class="panel config-panel">
                   <dl>
+                    <div><dt>ID</dt><dd id="configId">--</dd></div>
+                    <div><dt>名称</dt><dd id="configName">--</dd></div>
+                    <div><dt>IMEI</dt><dd id="configIMEI">--</dd></div>
+                    <div><dt>设备路径</dt><dd id="configUSBPath">--</dd></div>
+                    <div><dt>网卡</dt><dd id="configInterface">--</dd></div>
+                    <div><dt>AT 端口</dt><dd id="configATPort">--</dd></div>
+                    <div><dt>控制设备</dt><dd id="configControlDevice">--</dd></div>
+                    <div><dt>APN</dt><dd id="configAPN">--</dd></div>
                     <div><dt>设备后端</dt><dd>AT</dd></div>
                     <div><dt>短信能力</dt><dd>已启用</dd></div>
                     <div><dt>数据网络</dt><dd>SimRelay 暂不接管</dd></div>
                     <div><dt>VoWiFi / eSIM</dt><dd>SimRelay 暂不支持</dd></div>
                   </dl>
                 </div>
+              </div>
+            </section>
+          </div>
+        </section>
+
+        <section id="proxyView" class="view proxy-page hidden">
+          <div class="tabs standalone-tabs">
+            <button class="tab active" type="button">漫游前置代理</button>
+            <button class="tab" type="button">本地出站代理</button>
+          </div>
+          <div class="panel empty-module">
+            <div class="section-head">
+              <div>
+                <h2>VoWiFi 漫游前置代理</h2>
+                <p>VoWiFi 通过 Socks5 代理穿透连接海外运营商。注意 Socks5 端必须支持 UDP Associate</p>
+              </div>
+              <button class="primary-btn" type="button" id="addProxyBtn">新增代理</button>
+            </div>
+            <div class="empty-icon">∅</div>
+            <h2>暂无前置代理</h2>
+            <p>点击「新增代理」创建 Socks5 前置代理，绑定设备后 VoWiFi 将通过代理连接运营商</p>
+          </div>
+        </section>
+
+        <section id="logsView" class="view logs-page hidden">
+          <div class="panel logs-panel">
+            <div class="section-head">
+              <div class="log-actions">
+                <button id="pauseLogsBtn" class="glass-btn" type="button">暂停</button>
+                <button id="clearLogsBtn" class="glass-btn" type="button">清空</button>
+                <button id="exportLogsBtn" class="glass-btn" type="button">导出</button>
+                <span class="status-pill">已连接</span>
+                <span id="logCount">0 条日志</span>
+              </div>
+              <label class="checkbox-row"><input id="autoTailLogs" type="checkbox" checked /> 自动追尾</label>
+            </div>
+            <div class="log-filter-row">
+              <select id="logLevelFilter"><option value="all">全部</option><option>INFO</option><option>WARN</option><option>ERROR</option></select>
+              <input id="logSearch" placeholder="搜索日志内容..." />
+            </div>
+            <div id="logsList" class="logs-list"></div>
+          </div>
+        </section>
+
+        <section id="settingsView" class="view settings-page hidden">
+          <div class="settings-grid">
+            <section class="panel settings-card">
+              <h2>安全</h2>
+              <p>更新访问凭证</p>
+              <label for="currentPassword"><span>当前密码</span><input id="currentPassword" name="current_password" type="password" placeholder="••••••••" /></label>
+              <label for="newPassword"><span>新密码</span><input id="newPassword" name="new_password" type="password" placeholder="••••••••" /></label>
+              <label for="confirmPassword"><span>确认新密码</span><input id="confirmPassword" name="confirm_password" type="password" placeholder="••••••••" /></label>
+              <button class="primary-btn" type="button" id="updateCredentialBtn">更新凭证</button>
+            </section>
+            <section class="panel settings-card">
+              <h2>系统信息</h2>
+              <p>运行环境</p>
+              <dl>
+                <div><dt>版本</dt><dd id="settingsVersion">simrelay</dd></div>
+                <div><dt>构建时间</dt><dd id="settingsBuildTime">--</dd></div>
+                <div><dt>配置路径</dt><dd id="settingsConfigPath">environment</dd></div>
+                <div><dt>交流群</dt><dd>https://t.me/vohive</dd></div>
+                <div><dt>API 文档</dt><dd><button class="glass-btn" type="button">打开 API 文档</button></dd></div>
+              </dl>
+            </section>
+            <section class="panel settings-card settings-wide">
+              <div class="section-head">
+                <div>
+                  <h2>通知</h2>
+                  <p>Telegram / 飞书 / QQ / Webhook</p>
+                </div>
+                <button class="primary-btn" type="button" id="saveNotifyBtn">保存通知配置</button>
+              </div>
+              <div class="tabs standalone-tabs">
+                <button class="tab active" type="button">Telegram Bot</button>
+                <button class="tab" type="button">飞书 Bot</button>
+                <button class="tab" type="button">QQ Bot</button>
+                <button class="tab" type="button">Bark</button>
+                <button class="tab" type="button">Email</button>
+                <button class="tab" type="button">Pushplus</button>
+                <button class="tab" type="button">Webhook</button>
+              </div>
+              <div class="notify-grid">
+                <label class="switch-row" for="telegramEnabled"><span>启用 Telegram 机器人</span><input id="telegramEnabled" name="telegram_enabled" type="checkbox" /></label>
+                <label for="telegramToken"><span>BOT TOKEN</span><input id="telegramToken" name="telegram_token" disabled placeholder="xxxx:yyyy" /></label>
+                <label for="telegramChatId"><span>CHAT ID</span><input id="telegramChatId" name="telegram_chat_id" disabled placeholder="例如 123456" /></label>
+                <label for="telegramProxy"><span>HTTP 代理（可选）</span><input id="telegramProxy" name="telegram_proxy" disabled placeholder="例如 http://127.0.0.1:7890" /></label>
               </div>
             </section>
           </div>

@@ -148,6 +148,57 @@ func TestVoHiveDevices(t *testing.T) {
 	}
 }
 
+func TestVoHiveDashboardAndDeviceAuxiliaryEndpoints(t *testing.T) {
+	t.Setenv("SIMRELAY_DEVICE", "/dev/ttyUSB2")
+	server := New(&fakeModem{status: modem.DeviceStatus{Manufacturer: "Quectel", Model: "EC20F", IMEI: "865860049674642", SIM: "READY", SignalRSSI: 30, Registered: true}})
+	tests := []struct {
+		path string
+		want string
+	}{
+		{"/api/dashboard/devices", `"devices"`},
+		{"/api/devices/discovered", `"/dev/ttyUSB2"`},
+		{"/api/devices/ec20/config", `"config"`},
+		{"/api/devices/ec20/esim", `"profiles"`},
+		{"/api/devices/ec20/overview/stream", `"devices"`},
+	}
+	for _, tt := range tests {
+		req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d", tt.path, rec.Code)
+		}
+		if !bytes.Contains(rec.Body.Bytes(), []byte(tt.want)) {
+			t.Fatalf("%s body = %s", tt.path, rec.Body.String())
+		}
+	}
+}
+
+func TestVoHiveConsoleSupportEndpoints(t *testing.T) {
+	server := New(&fakeModem{})
+	tests := []struct {
+		path string
+		want string
+	}{
+		{"/api/traffic/analysis?range=day", `"buckets"`},
+		{"/api/logs", `"logs"`},
+		{"/api/settings", `"notify"`},
+		{"/api/proxies", `"proxies"`},
+		{"/api/proxy", `"items"`},
+	}
+	for _, tt := range tests {
+		req := httptest.NewRequest(http.MethodGet, tt.path, nil)
+		rec := httptest.NewRecorder()
+		server.ServeHTTP(rec, req)
+		if rec.Code != http.StatusOK {
+			t.Fatalf("%s status = %d", tt.path, rec.Code)
+		}
+		if !bytes.Contains(rec.Body.Bytes(), []byte(tt.want)) {
+			t.Fatalf("%s body = %s", tt.path, rec.Body.String())
+		}
+	}
+}
+
 func TestListMessages(t *testing.T) {
 	server := New(&fakeModem{messages: []modem.Message{{Index: 1, From: "+8613800000000", Text: "中文测试"}}})
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/messages?box=all", nil)
