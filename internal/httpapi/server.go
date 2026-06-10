@@ -1,20 +1,24 @@
 package httpapi
 
 import (
+	"database/sql"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"net/http"
 	"os"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/yupengsheng/SimRelay/internal/at"
 	"github.com/yupengsheng/SimRelay/internal/modem"
 	"github.com/yupengsheng/SimRelay/internal/web"
+	_ "modernc.org/sqlite"
 )
 
 type Modem interface {
@@ -32,6 +36,14 @@ type Server struct {
 	mux          *http.ServeMux
 	authUsername string
 	authPassword string
+	sentMu       sync.Mutex
+	sentMessages []modem.Message
+	nextSentID   int
+	sentStore    string
+	readMu       sync.Mutex
+	readMarks    map[string]int
+	readStore    string
+	vohiveDB     string
 }
 
 func New(modem Modem) http.Handler {
@@ -40,7 +52,14 @@ func New(modem Modem) http.Handler {
 		mux:          http.NewServeMux(),
 		authUsername: envString("SIMRELAY_ADMIN_USERNAME", "admin"),
 		authPassword: envString("SIMRELAY_ADMIN_PASSWORD", "admin"),
+		nextSentID:   -1,
+		sentStore:    strings.TrimSpace(os.Getenv("SIMRELAY_SENT_SMS_STORE")),
+		readMarks:    make(map[string]int),
+		readStore:    strings.TrimSpace(os.Getenv("SIMRELAY_READ_SMS_STORE")),
+		vohiveDB:     strings.TrimSpace(os.Getenv("SIMRELAY_VOHIVE_DB")),
 	}
+	server.loadSentMessages()
+	server.loadReadMarks()
 	server.routes()
 	return server
 }
@@ -125,7 +144,7 @@ func (s *Server) listMessages(w http.ResponseWriter, r *http.Request) {
 	if box == "" {
 		box = modem.BoxAll
 	}
-	messages, err := s.modem.ListMessages(box)
+	messages, err := s.messagesWithSent(box)
 	if err != nil {
 		writeError(w, statusForError(err), "读取短信列表失败")
 		return
@@ -167,6 +186,7 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request) {
 		writeError(w, statusForError(err), "发送短信失败")
 		return
 	}
+	s.recordSentMessage(req.To, req.Text)
 	writeJSON(w, http.StatusOK, result)
 }
 
@@ -297,19 +317,22 @@ func (s *Server) overviewStream(w http.ResponseWriter, _ *http.Request) {
 }
 
 func (s *Server) vohiveSMSContacts(w http.ResponseWriter, r *http.Request) {
-	messages, err := s.modem.ListMessages(modem.BoxAll)
+	messages, err := s.messagesWithSent(modem.BoxAll)
 	if err != nil {
 		writeVoHiveError(w, statusForError(err), "读取短信联系人失败")
 		return
 	}
 	status, _ := s.modem.DeviceStatus()
 	contacts := summarizeContacts(messages, status)
+	contacts = mergeContactLists(contacts, s.vohiveContacts())
 	writeJSON(w, http.StatusOK, contacts)
 }
 
 func (s *Server) vohiveSMSThread(w http.ResponseWriter, r *http.Request) {
 	peer := strings.TrimSpace(r.URL.Query().Get("peer"))
-	messages, err := s.modem.ListMessages(modem.BoxAll)
+	deviceID := strings.TrimSpace(r.URL.Query().Get("device_id"))
+	imsi := strings.TrimSpace(r.URL.Query().Get("imsi"))
+	messages, err := s.messagesWithSent(modem.BoxAll)
 	if err != nil {
 		writeVoHiveError(w, statusForError(err), "读取短信会话失败")
 		return
@@ -321,9 +344,14 @@ func (s *Server) vohiveSMSThread(w http.ResponseWriter, r *http.Request) {
 		}
 		thread = append(thread, vohiveMessage(message))
 	}
+	thread = append(thread, s.vohiveThread(peer)...)
 	sort.SliceStable(thread, func(i, j int) bool {
-		return thread[i].ID < thread[j].ID
+		return smsMessageLess(thread[i].Timestamp, thread[i].ID, thread[j].Timestamp, thread[j].ID)
 	})
+	latestIncomingID := maxIncomingMessageID(thread)
+	s.markThreadRead(threadReadKey(deviceID, imsi, peer), latestIncomingID)
+	s.markThreadRead(threadReadKey("", imsi, peer), latestIncomingID)
+	s.markThreadRead(threadReadKey("", "", peer), latestIncomingID)
 	writeJSON(w, http.StatusOK, thread)
 }
 
@@ -356,14 +384,23 @@ func (s *Server) vohiveSMSSend(w http.ResponseWriter, r *http.Request) {
 		writeVoHiveError(w, statusForError(err), "发送短信失败")
 		return
 	}
+	s.recordSentMessage(to, body)
 	writeJSON(w, http.StatusOK, map[string]any{"status": "ok", "reference": result.Reference, "parts_total": 1})
 }
 
 func (s *Server) vohiveSMSDeleteMessage(w http.ResponseWriter, r *http.Request) {
 	rawIndex := strings.TrimPrefix(r.URL.Path, "/api/sms/messages/")
 	index, err := strconv.Atoi(rawIndex)
-	if err != nil || index <= 0 {
+	if err != nil || index == 0 {
 		writeVoHiveError(w, http.StatusBadRequest, "短信索引非法")
+		return
+	}
+	if index < 0 {
+		if !s.deleteSentMessage(index) {
+			writeVoHiveError(w, http.StatusNotFound, "短信不存在")
+			return
+		}
+		writeJSON(w, http.StatusOK, map[string]any{"status": "ok"})
 		return
 	}
 	if err := s.modem.DeleteMessage(index); err != nil {
@@ -379,7 +416,7 @@ func (s *Server) vohiveSMSDeleteThread(w http.ResponseWriter, r *http.Request) {
 		writeVoHiveError(w, http.StatusBadRequest, "缺少 peer 参数")
 		return
 	}
-	messages, err := s.modem.ListMessages(modem.BoxAll)
+	messages, err := s.messagesWithSent(modem.BoxAll)
 	if err != nil {
 		writeVoHiveError(w, statusForError(err), "读取短信会话失败")
 		return
@@ -387,6 +424,12 @@ func (s *Server) vohiveSMSDeleteThread(w http.ResponseWriter, r *http.Request) {
 	deleted := 0
 	for _, message := range messages {
 		if message.From != peer {
+			continue
+		}
+		if message.Index < 0 {
+			if s.deleteSentMessage(message.Index) {
+				deleted++
+			}
 			continue
 		}
 		if err := s.modem.DeleteMessage(message.Index); err != nil {
@@ -594,6 +637,405 @@ func writeVoHiveError(w http.ResponseWriter, status int, message string) {
 	writeJSON(w, status, map[string]string{"message": message, "status": "error"})
 }
 
+const sentMessageLimit = 500
+
+func (s *Server) messagesWithSent(box modem.MessageBox) ([]modem.Message, error) {
+	messages, err := s.modem.ListMessages(box)
+	if err != nil {
+		return nil, err
+	}
+	if box != modem.BoxAll && box != modem.BoxSent {
+		return messages, nil
+	}
+	s.sentMu.Lock()
+	sent := append([]modem.Message(nil), s.sentMessages...)
+	s.sentMu.Unlock()
+	return append(messages, sent...), nil
+}
+
+func (s *Server) recordSentMessage(to string, text string) {
+	message := modem.Message{
+		Status:    "STO SENT",
+		From:      strings.TrimSpace(to),
+		Timestamp: time.Now().Format(time.RFC3339),
+		Text:      text,
+	}
+
+	s.sentMu.Lock()
+	message.Index = s.nextSentID
+	s.nextSentID--
+	s.sentMessages = append(s.sentMessages, message)
+	if len(s.sentMessages) > sentMessageLimit {
+		s.sentMessages = append([]modem.Message(nil), s.sentMessages[len(s.sentMessages)-sentMessageLimit:]...)
+	}
+	sent := append([]modem.Message(nil), s.sentMessages...)
+	s.sentMu.Unlock()
+
+	s.saveSentMessages(sent)
+}
+
+func (s *Server) deleteSentMessage(index int) bool {
+	s.sentMu.Lock()
+	found := false
+	messages := s.sentMessages[:0]
+	for _, message := range s.sentMessages {
+		if message.Index == index {
+			found = true
+			continue
+		}
+		messages = append(messages, message)
+	}
+	s.sentMessages = messages
+	sent := append([]modem.Message(nil), s.sentMessages...)
+	s.sentMu.Unlock()
+
+	if found {
+		s.saveSentMessages(sent)
+	}
+	return found
+}
+
+func (s *Server) loadSentMessages() {
+	if s.sentStore == "" {
+		return
+	}
+	data, err := os.ReadFile(s.sentStore)
+	if err != nil {
+		return
+	}
+	var messages []modem.Message
+	if err := json.Unmarshal(data, &messages); err != nil {
+		return
+	}
+	nextID := -1
+	filtered := make([]modem.Message, 0, len(messages))
+	for _, message := range messages {
+		if message.Index >= 0 {
+			continue
+		}
+		if message.Status == "" {
+			message.Status = "STO SENT"
+		}
+		filtered = append(filtered, message)
+		if message.Index <= nextID {
+			nextID = message.Index - 1
+		}
+	}
+	if len(filtered) > sentMessageLimit {
+		filtered = filtered[len(filtered)-sentMessageLimit:]
+	}
+	s.sentMessages = filtered
+	s.nextSentID = nextID
+}
+
+func (s *Server) saveSentMessages(messages []modem.Message) {
+	if s.sentStore == "" {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(s.sentStore), 0o755); err != nil {
+		return
+	}
+	data, err := json.MarshalIndent(messages, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(s.sentStore, data, 0o600)
+}
+
+func (s *Server) loadReadMarks() {
+	if s.readStore == "" {
+		return
+	}
+	data, err := os.ReadFile(s.readStore)
+	if err != nil {
+		return
+	}
+	var marks map[string]int
+	if err := json.Unmarshal(data, &marks); err != nil {
+		return
+	}
+	if marks == nil {
+		return
+	}
+	s.readMarks = marks
+}
+
+func (s *Server) saveReadMarks(marks map[string]int) {
+	if s.readStore == "" {
+		return
+	}
+	if err := os.MkdirAll(filepath.Dir(s.readStore), 0o755); err != nil {
+		return
+	}
+	data, err := json.MarshalIndent(marks, "", "  ")
+	if err != nil {
+		return
+	}
+	_ = os.WriteFile(s.readStore, data, 0o600)
+}
+
+func (s *Server) markThreadRead(key string, latestID int) {
+	if key == "" || latestID <= 0 {
+		return
+	}
+	s.readMu.Lock()
+	if latestID > s.readMarks[key] {
+		s.readMarks[key] = latestID
+	}
+	marks := copyReadMarks(s.readMarks)
+	s.readMu.Unlock()
+	s.saveReadMarks(marks)
+}
+
+func (s *Server) readMark(key string) int {
+	if key == "" {
+		return 0
+	}
+	s.readMu.Lock()
+	defer s.readMu.Unlock()
+	return s.readMarks[key]
+}
+
+func (s *Server) openVoHiveDB() (*sql.DB, error) {
+	if s.vohiveDB == "" {
+		return nil, os.ErrNotExist
+	}
+	db, err := sql.Open("sqlite", "file:"+s.vohiveDB+"?mode=ro&cache=shared&_pragma=busy_timeout(1000)")
+	if err != nil {
+		return nil, err
+	}
+	return db, nil
+}
+
+func (s *Server) vohiveContacts() []map[string]any {
+	db, err := s.openVoHiveDB()
+	if err != nil {
+		return nil
+	}
+	defer db.Close()
+
+	rows, err := db.Query(`
+		select
+			c.imsi,
+			c.peer,
+			c.last_sms_id,
+			c.last_timestamp,
+			c.last_content,
+			c.last_type,
+			c.unread_count,
+			c.created_at,
+			c.updated_at,
+			coalesce(d.alias, '') as device_id,
+			coalesce(ss.phone_number, d.alias, '') as device_name,
+			coalesce(ss.phone_number, '') as local_phone
+		from sms_contacts c
+		left join sim_subscriptions ss on ss.imsi = c.imsi
+		left join sim_cards sc on sc.imsi = c.imsi
+		left join devices d on d.imei = sc.current_imei
+		order by c.last_timestamp desc
+		limit 500
+	`)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	contacts := make([]map[string]any, 0)
+	for rows.Next() {
+		var imsi, peer, lastTimestamp, lastContent, createdAt, updatedAt, deviceID, deviceName, localPhone string
+		var lastID, lastType, unreadCount int
+		if err := rows.Scan(&imsi, &peer, &lastID, &lastTimestamp, &lastContent, &lastType, &unreadCount, &createdAt, &updatedAt, &deviceID, &deviceName, &localPhone); err != nil {
+			return contacts
+		}
+		if deviceID == "" {
+			deviceID = "vohive"
+		}
+		if deviceName == "" {
+			deviceName = firstNonEmpty(localPhone, deviceID)
+		}
+		unreadCount = s.vohiveUnreadCount(db, deviceID, imsi, peer, lastID)
+		contacts = append(contacts, map[string]any{
+			"imsi":           imsi,
+			"peer":           peer,
+			"last_sms_id":    lastID,
+			"last_timestamp": normalizeVoHiveTime(lastTimestamp),
+			"last_content":   lastContent,
+			"last_type":      lastType,
+			"unread_count":   unreadCount,
+			"created_at":     normalizeVoHiveTime(createdAt),
+			"updated_at":     normalizeVoHiveTime(updatedAt),
+			"device_id":      deviceID,
+			"device_name":    deviceName,
+			"local_phone":    localPhone,
+		})
+	}
+	return contacts
+}
+
+func (s *Server) vohiveThread(peer string) []vohiveSMSMessage {
+	db, err := s.openVoHiveDB()
+	if err != nil {
+		return nil
+	}
+	defer db.Close()
+
+	query := `
+		select
+			s.id,
+			s.imsi,
+			s.peer,
+			coalesce(s.local_phone, '') as local_phone,
+			s.type,
+			s.status,
+			s.content,
+			s.timestamp,
+			coalesce(d.alias, '') as device_id
+		from sms s
+		left join sim_cards sc on sc.imsi = s.imsi
+		left join devices d on d.imei = sc.current_imei
+	`
+	args := []any{}
+	if peer != "" {
+		query += " where s.peer = ?"
+		args = append(args, peer)
+	}
+	query += " order by s.timestamp asc limit 500"
+
+	rows, err := db.Query(query, args...)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+
+	messages := make([]vohiveSMSMessage, 0)
+	for rows.Next() {
+		var message vohiveSMSMessage
+		var status int
+		if err := rows.Scan(&message.ID, &message.IMSI, &message.Peer, &message.Local, &message.Type, &status, &message.Content, &message.Timestamp, &message.DeviceID); err != nil {
+			return messages
+		}
+		if message.DeviceID == "" {
+			message.DeviceID = "vohive"
+		}
+		message.Status = strconv.Itoa(status)
+		message.Timestamp = normalizeVoHiveTime(message.Timestamp)
+		messages = append(messages, message)
+	}
+	return messages
+}
+
+func (s *Server) vohiveUnreadCount(db *sql.DB, deviceID string, imsi string, peer string, lastID int) int {
+	readID := maxInt(s.readMark(threadReadKey(deviceID, imsi, peer)), s.readMark(threadReadKey("", imsi, peer)), s.readMark(threadReadKey("", "", peer)))
+	if readID >= lastID {
+		return 0
+	}
+	var count int
+	err := db.QueryRow(`select count(*) from sms where imsi = ? and peer = ? and type = 1 and id > ?`, imsi, peer, readID).Scan(&count)
+	if err != nil {
+		return 0
+	}
+	return count
+}
+
+func mergeContactLists(base []map[string]any, extra []map[string]any) []map[string]any {
+	if len(extra) == 0 {
+		return base
+	}
+	contacts := make(map[string]map[string]any, len(base)+len(extra))
+	for _, contact := range append(base, extra...) {
+		key := contactKey(contact)
+		current, ok := contacts[key]
+		if !ok || smsMessageLess(stringValue(current["last_timestamp"]), intValue(current["last_sms_id"]), stringValue(contact["last_timestamp"]), intValue(contact["last_sms_id"])) {
+			contacts[key] = contact
+		}
+	}
+	result := make([]map[string]any, 0, len(contacts))
+	for _, contact := range contacts {
+		result = append(result, contact)
+	}
+	sort.SliceStable(result, func(i, j int) bool {
+		return smsMessageLess(stringValue(result[j]["last_timestamp"]), intValue(result[j]["last_sms_id"]), stringValue(result[i]["last_timestamp"]), intValue(result[i]["last_sms_id"]))
+	})
+	return result
+}
+
+func contactKey(contact map[string]any) string {
+	return stringValue(contact["device_id"]) + "|" + stringValue(contact["imsi"]) + "|" + stringValue(contact["peer"])
+}
+
+func threadReadKey(deviceID string, imsi string, peer string) string {
+	if peer == "" {
+		return ""
+	}
+	return strings.TrimSpace(deviceID) + "|" + strings.TrimSpace(imsi) + "|" + strings.TrimSpace(peer)
+}
+
+func maxIncomingMessageID(messages []vohiveSMSMessage) int {
+	latest := 0
+	for _, message := range messages {
+		if message.Type != 1 || message.ID <= latest {
+			continue
+		}
+		latest = message.ID
+	}
+	return latest
+}
+
+func copyReadMarks(marks map[string]int) map[string]int {
+	copied := make(map[string]int, len(marks))
+	for key, value := range marks {
+		copied[key] = value
+	}
+	return copied
+}
+
+func maxInt(values ...int) int {
+	maxValue := 0
+	for _, value := range values {
+		if value > maxValue {
+			maxValue = value
+		}
+	}
+	return maxValue
+}
+
+func normalizeVoHiveTime(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if parsed, err := time.Parse(time.RFC3339Nano, value); err == nil {
+		return parsed.Format(time.RFC3339)
+	}
+	if parsed, err := time.Parse("2006-01-02 15:04:05.999999999-07:00", value); err == nil {
+		return parsed.Format(time.RFC3339)
+	}
+	if parsed, err := time.Parse("2006-01-02 15:04:05-07:00", value); err == nil {
+		return parsed.Format(time.RFC3339)
+	}
+	return value
+}
+
+func stringValue(value any) string {
+	if text, ok := value.(string); ok {
+		return text
+	}
+	return ""
+}
+
+func intValue(value any) int {
+	switch number := value.(type) {
+	case int:
+		return number
+	case int64:
+		return int(number)
+	case float64:
+		return int(number)
+	default:
+		return 0
+	}
+}
+
 func envString(key string, fallback string) string {
 	if value := os.Getenv(key); value != "" {
 		return value
@@ -625,7 +1067,7 @@ func summarizeContacts(messages []modem.Message, status modem.DeviceStatus) []ma
 			peer = "未知号码"
 		}
 		current, ok := contacts[peer]
-		if !ok || message.Index >= current["last_sms_id"].(int) {
+		if !ok || smsMessageLess(current["last_timestamp"].(string), current["last_sms_id"].(int), message.Timestamp, message.Index) {
 			contacts[peer] = map[string]any{
 				"imsi":           "",
 				"peer":           peer,
@@ -650,7 +1092,7 @@ func summarizeContacts(messages []modem.Message, status modem.DeviceStatus) []ma
 		result = append(result, contact)
 	}
 	sort.SliceStable(result, func(i, j int) bool {
-		return result[i]["last_sms_id"].(int) > result[j]["last_sms_id"].(int)
+		return smsMessageLess(result[j]["last_timestamp"].(string), result[j]["last_sms_id"].(int), result[i]["last_timestamp"].(string), result[i]["last_sms_id"].(int))
 	})
 	return result
 }
@@ -673,6 +1115,37 @@ func messageType(status string) int {
 		return 2
 	}
 	return 1
+}
+
+func smsMessageLess(leftTimestamp string, leftID int, rightTimestamp string, rightID int) bool {
+	leftTime, leftOK := parseSMSTime(leftTimestamp)
+	rightTime, rightOK := parseSMSTime(rightTimestamp)
+	if leftOK && rightOK && !leftTime.Equal(rightTime) {
+		return leftTime.Before(rightTime)
+	}
+	if leftOK != rightOK {
+		return !leftOK
+	}
+	return leftID < rightID
+}
+
+func parseSMSTime(value string) (time.Time, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, false
+	}
+	if parsed, err := time.Parse(time.RFC3339, value); err == nil {
+		return parsed, true
+	}
+	if len(value) >= len("06/01/02,15:04:05") {
+		if parsed, err := time.ParseInLocation("06/01/02,15:04:05", value[:len("06/01/02,15:04:05")], time.Local); err == nil {
+			return parsed, true
+		}
+	}
+	if parsed, err := time.Parse("06/01/02,15:04:05-07", value); err == nil {
+		return parsed, true
+	}
+	return time.Time{}, false
 }
 
 func rssiToDBM(rssi int) int {

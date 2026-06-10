@@ -6,19 +6,28 @@ services:
     restart: unless-stopped
     environment:
       TZ: Asia/Shanghai
-      SIMRELAY_DEVICE: /dev/ttyUSB2
+      SIMRELAY_DEVICE: /dev/ttyUSB3
       SIMRELAY_BAUD: "115200"
       SIMRELAY_LISTEN: ":7575"
       SIMRELAY_TIMEOUT: 5s
       SIMRELAY_ADMIN_USERNAME: admin
       SIMRELAY_ADMIN_PASSWORD: ${SIMRELAY_ADMIN_PASSWORD:-admin}
+      SIMRELAY_SENT_SMS_STORE: /var/lib/simrelay/sent-sms.json
+      SIMRELAY_READ_SMS_STORE: /var/lib/simrelay/read-sms.json
+      SIMRELAY_VOHIVE_DB: /var/lib/vohive/vohive.db
     devices:
-      - /dev/ttyUSB2:/dev/ttyUSB2
+      - /dev/ttyUSB3:/dev/ttyUSB3
     ports:
       - "7576:7575"
+    volumes:
+      - simrelay-data:/var/lib/simrelay
+      - /home/yupengsheng/vohive-docker/data:/var/lib/vohive:ro
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "-", "http://127.0.0.1:7575/healthz"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 20s
+
+volumes:
+  simrelay-data:

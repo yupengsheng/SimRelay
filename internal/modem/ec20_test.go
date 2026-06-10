@@ -46,7 +46,8 @@ func TestInitUsesChineseCapableUCS2Mode(t *testing.T) {
 		"AT+CMGF=1",
 		`AT+CSCS="UCS2"`,
 		"AT+CSMP=17,167,0,8",
-		`AT+CPMS="SM","SM","SM"`,
+		`AT+CPMS="MT","MT","MT"`,
+		"AT+CNMI=2,1,2,1,0",
 	}
 	if !reflect.DeepEqual(client.commands, want) {
 		t.Fatalf("commands = %#v, want %#v", client.commands, want)

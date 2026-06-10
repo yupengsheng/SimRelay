@@ -59,6 +59,9 @@ go build -o simrelay ./cmd/simrelay
 | `SIMRELAY_TIMEOUT` | `5s` | AT 命令超时时间 |
 | `SIMRELAY_ADMIN_USERNAME` | `admin` | Web 控制台账号 |
 | `SIMRELAY_ADMIN_PASSWORD` | `admin` | Web 控制台密码，部署时建议通过环境变量覆盖 |
+| `SIMRELAY_SENT_SMS_STORE` | 空 | 可选，保存本地已发送短信记录的 JSON 文件路径 |
+| `SIMRELAY_READ_SMS_STORE` | 空 | 可选，保存短信会话已读水位的 JSON 文件路径 |
+| `SIMRELAY_VOHIVE_DB` | 空 | 可选，只读读取 VoHive SQLite 短信库，用于展示 QMI 收到但 AT 存储中不可见的短信 |
 
 ## Web 控制台
 
@@ -78,7 +81,7 @@ http://127.0.0.1:7575/
 
 ## Docker 部署
 
-本仓库提供 `Dockerfile` 和 `docker-compose.yml`。EC20 AT 串口必须映射进容器。当前 Docker VM 实机验证可用的 AT 口是 `/dev/ttyUSB3`，宿主机端口使用 `7576`，避免和现有 VoHive 的 `7575` 冲突。
+本仓库提供 `Dockerfile` 和 `docker-compose.yml`。EC20 AT 串口必须映射进容器。当前 Docker VM 实机验证可用的 AT 口是 `/dev/ttyUSB3`，宿主机端口使用 `7576`，避免和现有 VoHive 的 `7575` 冲突。Compose 默认把本地已发送短信记录写入 `simrelay-data` 卷内的 `/var/lib/simrelay/sent-sms.json`，用于补齐 EC20 不保存已发送短信时的会话记录；同时只读挂载 VoHive 的 `/home/yupengsheng/vohive-docker/data`，用于展示 QMI 收到但 AT 短信存储不可见的短信。
 
 ```bash
 docker compose up -d --build
@@ -175,10 +178,11 @@ ATE0
 AT+CMGF=1
 AT+CSCS="UCS2"
 AT+CSMP=17,167,0,8
-AT+CPMS="SM","SM","SM"
+AT+CPMS="MT","MT","MT"
+AT+CNMI=2,1,2,1,0
 ```
 
-其中 `AT+CSCS="UCS2"` 和 `AT+CSMP=17,167,0,8` 用于优先支持中文短信。
+其中 `AT+CSCS="UCS2"` 和 `AT+CSMP=17,167,0,8` 用于优先支持中文短信，`AT+CPMS="MT","MT","MT"` 使用模组聚合短信存储，`AT+CNMI=2,1,2,1,0` 让新短信按索引通知并进入可查询存储。
 
 ## 开发验证
 

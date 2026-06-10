@@ -21,6 +21,7 @@ const state = {
   trafficRange: 'day',
   logsPaused: false,
   composingNewSMS: false,
+  smsRefreshBusy: false,
 }
 
 const $ = (selector) => document.querySelector(selector)
@@ -301,6 +302,27 @@ async function refreshAll() {
   }
 }
 
+async function refreshSMSQuietly() {
+  if (!state.token || state.route !== 'sms' || document.hidden || state.smsRefreshBusy) return
+  state.smsRefreshBusy = true
+  try {
+    const beforeKey = state.selectedContact
+    const beforeLastID = state.messages.at(-1)?.id
+    await loadContacts({ keepSelection: true })
+    if (state.selectedContact || state.composingNewSMS) {
+      await loadThread()
+      const afterLastID = state.messages.at(-1)?.id
+      if (beforeKey === state.selectedContact && beforeLastID !== afterLastID) scrollMessagesToBottom()
+    }
+    renderSMSMode()
+    setOnline(true)
+  } catch (err) {
+    setOnline(false)
+  } finally {
+    state.smsRefreshBusy = false
+  }
+}
+
 async function loadDevices(endpoint = '/devices') {
   const data = await api(endpoint)
   state.devices = Array.isArray(data.devices) ? data.devices : []
@@ -412,6 +434,8 @@ async function loadThread() {
   }
   const messages = await api(`/sms/thread?${params}`)
   state.messages = Array.isArray(messages) ? messages : []
+  contact.unread_count = 0
+  renderContacts()
   renderMessages()
 }
 
@@ -770,10 +794,19 @@ async function sendMessage(event) {
     })
     els.messageInput.value = ''
     updateEncoding()
-    state.composingNewSMS = false
     showToast(`发送成功${data.reference ? `，引用号 ${data.reference}` : ''}`, 'success')
     await loadContacts({ keepSelection: true })
-    if (state.selectedContact) await loadThread()
+    const sentContact = state.contacts.find((contact) => contact.peer === phone)
+    if (sentContact) {
+      state.selectedContact = contactKey(sentContact)
+      state.composingNewSMS = false
+      await loadThread()
+    } else if (state.selectedContact) {
+      state.composingNewSMS = false
+      await loadThread()
+    } else {
+      state.composingNewSMS = true
+    }
     renderSMSMode()
   } catch (err) {
     showToast(err.message)
@@ -1119,6 +1152,10 @@ window.addEventListener('keydown', (event) => {
 })
 window.addEventListener('resize', () => {
   if (state.route === 'sms') renderSMSMode()
+})
+window.setInterval(refreshSMSQuietly, 5000)
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) refreshSMSQuietly()
 })
 window.addEventListener('hashchange', () => {
   const route = normalizeRoute(location.hash.replace('#/', '') || 'dashboard')

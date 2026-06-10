@@ -83,7 +83,8 @@ ATE0
 AT+CMGF=1
 AT+CSCS="UCS2"
 AT+CSMP=17,167,0,8
-AT+CPMS="SM","SM","SM"
+AT+CPMS="MT","MT","MT"
+AT+CNMI=2,1,2,1,0
 ```
 
 设备状态使用：

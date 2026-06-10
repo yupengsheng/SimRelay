@@ -68,7 +68,8 @@ func (m *EC20) Init() error {
 		"AT+CMGF=1",
 		`AT+CSCS="UCS2"`,
 		"AT+CSMP=17,167,0,8",
-		`AT+CPMS="SM","SM","SM"`,
+		`AT+CPMS="MT","MT","MT"`,
+		"AT+CNMI=2,1,2,1,0",
 	}
 	for _, command := range commands {
 		if _, err := m.at.Command(command); err != nil {
